@@ -89,17 +89,6 @@ jobs:
             VCS_REF=${{ github.sha }}
             VERSION=${{ steps.meta.outputs.version }}
 
-      # Update Docker Hub description
-      - name: Update Docker Hub Description
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        uses: peter-evans/dockerhub-description@v4
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-          repository: ${{ secrets.DOCKERHUB_USERNAME }}/letterboxarr
-          readme-filepath: ./README.md
-          short-description: 'Automatically sync Letterboxd watchlist to Radarr'
-
       # Create release if it's a tag
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/v')
