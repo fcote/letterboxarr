@@ -1,0 +1,11 @@
+# PyCharm
+.idea
+
+# Python virtual environment
+.venv
+
+# Data file
+processed_movies.json
+
+# Environment file
+.env

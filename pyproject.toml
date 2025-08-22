@@ -1,0 +1,10 @@
+[project]
+name = "letterboxarr"
+version = "1.0.0"
+description = "Automatically sync your Letterboxd watchlist to your Radarr instance"
+requires-python = ">=3.9"
+dependencies = [
+    "requests==2.31.0",
+    "beautifulsoup4==4.12.2",
+    "lxml==4.9.3"
+]
