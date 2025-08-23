@@ -52,7 +52,9 @@ def main():
         radarr_url=radarr_url,
         radarr_api_key=radarr_api_key,
         quality_profile=quality_profile,
-        root_folder=root_folder
+        root_folder=root_folder,
+        monitor_movies=monitor_movies,
+        search_movies=search_movies
     )
 
     # Log configuration

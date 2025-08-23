@@ -59,6 +59,22 @@ class LetterboxdScraper:
         self.logger.info(f"Found {len(movies)} movies in watchlist")
         return movies
 
+    def get_movie_tmdb_id(self, letterboxd_slug: str) -> Optional[int]:
+        """Fetch TMDB ID for a movie from Letterboxd"""
+        url = f"https://letterboxd.com/film/{letterboxd_slug}/"
+        try:
+            response = self.session.get(url)
+            response.raise_for_status()
+        except requests.RequestException as e:
+            self.logger.error(f"Error fetching movie page: {e}")
+            return None
+
+        soup = BeautifulSoup(response.content, 'html.parser')
+        body = soup.find('body')
+        if body:
+            return int(body.get('data-tmdb-id'))
+        return None
+
     def _extract_movie_data(self, item) -> Optional[Dict]:
         """Extract movie information from a poster element"""
         try:

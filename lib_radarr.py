@@ -3,6 +3,10 @@ from typing import Optional, Dict, List
 import requests
 
 
+class MultipleMatchesError(ValueError):
+    pass
+
+
 class RadarrAPI:
     """Interface with Radarr API"""
 
@@ -21,11 +25,14 @@ class RadarrAPI:
             'Content-Type': 'application/json'
         })
 
-    def search_movie(self, title: str, year: Optional[int] = None) -> Optional[Dict]:
+    def search_movie(self, title: str, year: Optional[int] = None, tmdb_id: Optional[int] = None) -> Optional[Dict]:
         """Search for a movie in Radarr/TMDB"""
-        search_term = f"{title}"
-        if year:
-            search_term += f" {year}"
+        if tmdb_id:
+            search_term = f"tmdb:{tmdb_id}"
+        else:
+            search_term = f"{title}"
+            if year:
+                search_term += f" {year}"
 
         try:
             response = self.session.get(
@@ -39,21 +46,17 @@ class RadarrAPI:
                 self.logger.warning(f"No results found for: {search_term}")
                 return None
 
-            # Try to find exact match or best match
-            best_match = None
+            matches = []
             for movie in results:
                 # Exact title and year match
                 if year and movie.get('year') == year:
                     if movie.get('title', '').lower() == title.lower():
-                        return movie
-                    if not best_match:
-                        best_match = movie
-                # Just title match if no year
-                elif not year and movie.get('title', '').lower() == title.lower():
-                    return movie
+                        matches.append(movie)
 
-            # Return best match or first result
-            return best_match or results[0]
+            if len(matches) == 1:
+                return matches[0]
+
+            raise MultipleMatchesError(f"Multiple matches found for {search_term}")
 
         except requests.RequestException as e:
             self.logger.error(f"Error searching for movie {title}: {e}")

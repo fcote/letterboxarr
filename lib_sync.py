@@ -3,7 +3,7 @@ import os
 import time
 
 from lib_letterboxd import LetterboxdScraper
-from lib_radarr import RadarrAPI
+from lib_radarr import RadarrAPI, MultipleMatchesError
 
 
 class LetterboxdRadarrSync:
@@ -60,7 +60,13 @@ class LetterboxdRadarrSync:
 
             # Search for movie in Radarr/TMDB
             self.logger.info(f"Processing: {movie['title']} ({movie.get('year', 'N/A')})")
-            radarr_movie = self.radarr.search_movie(movie['title'], movie.get('year'))
+            radarr_movie = None
+            try:
+                radarr_movie = self.radarr.search_movie(movie['title'], movie.get('year'))
+            except MultipleMatchesError:
+                tmdb_id = self.letterboxd.get_movie_tmdb_id(movie['letterboxd_slug'])
+                if tmdb_id:
+                    radarr_movie = self.radarr.search_movie(movie['title'], movie.get('year'), tmdb_id)
 
             if not radarr_movie:
                 self.logger.warning(f"Could not find in TMDB: {movie['title']}")
