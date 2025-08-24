@@ -35,6 +35,14 @@ class RadarrAPI:
                 search_term += f" {year}"
 
         try:
+            if tmdb_id:
+                response = self.session.get(
+                    f"{self.base_url}/api/v3/movie/lookup/tmdb",
+                    params={'tmdbId': tmdb_id}
+                )
+                response.raise_for_status()
+                return response.json()
+
             response = self.session.get(
                 f"{self.base_url}/api/v3/movie/lookup",
                 params={'term': search_term}
