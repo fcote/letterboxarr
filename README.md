@@ -51,8 +51,7 @@ Note the `path` of your movies folder.
 1. Create a docker-compose.yml file with the following content:
 
 ```yaml
-version: '3.8'
-
+---
 services:
   letterboxarr:
     image: fcote/letterboxarr:latest
@@ -61,10 +60,12 @@ services:
     environment:
       - RADARR_API_KEY=your_radarr_api_key_here
       - LETTERBOXD_USERNAME=your_letterboxd_username_here
-      - RADARR_URL=http://radarr:7878  # Change to your Radarr URL
-      - RADARR_QUALITY_PROFILE=1       # Change to your preferred quality profile ID
-      - RADARR_ROOT_FOLDER=/movies     # Change to your movies folder path
-      - SYNC_INTERVAL_MINUTES=60       # How often to check for new movies
+      - RADARR_URL=http://radarr:7878             # Change to your Radarr URL
+      - RADARR_QUALITY_PROFILE=1                  # Change to your preferred quality profile ID
+      - RADARR_ROOT_FOLDER=/movies                # Change to your movies folder path
+      - RADARR_MONITOR_ADDED_MOVIES=true          # Monitor added movies
+      - RADARR_START_SEARCHING_ADDED_MOVIES=true  # Start searching for added movies
+      - SYNC_INTERVAL_MINUTES=60                  # How often to check for new movies
 
     volumes:
       - ./data:/app/data  # Persistent storage for tracking processed movies
@@ -93,6 +94,8 @@ docker run -d \
   -e RADARR_URL=http://192.168.1.100:7878 \
   -e RADARR_QUALITY_PROFILE=4 \
   -e RADARR_ROOT_FOLDER=/movies \
+  -e RADARR_MONITOR_ADDED_MOVIES=true \
+  -e RADARR_START_SEARCHING_ADDED_MOVIES=true \
   -e SYNC_INTERVAL_MINUTES=60 \
   -v $(pwd)/data:/app/data \
   letterboxarr
@@ -112,6 +115,8 @@ export LETTERBOXD_USERNAME=your_letterboxd_username
 export RADARR_URL=http://localhost:7878
 export RADARR_QUALITY_PROFILE=4
 export RADARR_ROOT_FOLDER=/movies
+export RADARR_MONITOR_ADDED_MOVIES=true
+export RADARR_START_SEARCHING_ADDED_MOVIES=true
 export SYNC_INTERVAL_MINUTES=60
 ```
 

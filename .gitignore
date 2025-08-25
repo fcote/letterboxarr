@@ -5,7 +5,7 @@
 .venv
 
 # Data file
-processed_movies.json
+data
 
 # Environment file
 .env

@@ -9,6 +9,12 @@ from lib_radarr import RadarrAPI, MultipleMatchesError
 class LetterboxdRadarrSync:
     """Main sync orchestrator"""
 
+    # Data directory
+    DATA_DIR = './data'
+
+    # Filepath for processed movies
+    PROCESSED_MOVIES_FILEPATH = './data/processed_movies.json'
+
     def __init__(self, logger, letterboxd_username: str, radarr_url: str,
                  radarr_api_key: str, quality_profile: int, root_folder: str,
                  monitor_movies: bool = True, search_movies: bool = True):
@@ -21,8 +27,8 @@ class LetterboxdRadarrSync:
     def _load_processed_movies(self) -> set:
         """Load previously processed movies from file"""
         try:
-            if os.path.exists('processed_movies.json'):
-                with open('processed_movies.json', 'r') as f:
+            if os.path.exists(LetterboxdRadarrSync.PROCESSED_MOVIES_FILEPATH):
+                with open(LetterboxdRadarrSync.PROCESSED_MOVIES_FILEPATH, 'r') as f:
                     return set(json.load(f))
         except Exception as e:
             self.logger.error(f"Error loading processed movies: {e}")
@@ -31,7 +37,10 @@ class LetterboxdRadarrSync:
     def _save_processed_movies(self):
         """Save processed movies to file"""
         try:
-            with open('processed_movies.json', 'w') as f:
+            if not os.path.exists(LetterboxdRadarrSync.DATA_DIR):
+                os.makedirs(LetterboxdRadarrSync.DATA_DIR)
+
+            with open(LetterboxdRadarrSync.PROCESSED_MOVIES_FILEPATH, 'w') as f:
                 json.dump(list(self.processed_movies), f)
         except Exception as e:
             self.logger.error(f"Error saving processed movies: {e}")
