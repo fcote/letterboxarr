@@ -115,14 +115,7 @@ docker build -t letterboxarr .
 docker run -d \
   --name letterboxarr \
   --restart unless-stopped \
-  -e RADARR_API_KEY=your_api_key \
-  -e LETTERBOXD_USERNAME=your_letterboxd_username \
-  -e RADARR_URL=http://192.168.1.100:7878 \
-  -e RADARR_QUALITY_PROFILE=4 \
-  -e RADARR_ROOT_FOLDER=/movies \
-  -e RADARR_MONITOR_ADDED_MOVIES=true \
-  -e RADARR_START_SEARCHING_ADDED_MOVIES=true \
-  -e SYNC_INTERVAL_MINUTES=60 \
+  -v $(pwd)/config.yml:/app/config.yml \
   -v $(pwd)/data:/app/data \
   letterboxarr
 ```

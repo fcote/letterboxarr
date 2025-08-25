@@ -4,7 +4,6 @@ Letterboxd to Radarr Watchlist Sync
 Monitors Letterboxd lists and imports movies to Radarr
 """
 
-import os
 import sys
 import logging
 from pathlib import Path
