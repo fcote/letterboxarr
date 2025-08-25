@@ -136,30 +136,6 @@ pip install -r requirements.txt
 python main.py
 ```
 
-#### With Environment Variables (Legacy)
-
-1. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-2. Set environment variables:
-```bash
-export RADARR_API_KEY=your_api_key
-export LETTERBOXD_USERNAME=your_letterboxd_username
-export RADARR_URL=http://localhost:7878
-export RADARR_QUALITY_PROFILE=4
-export RADARR_ROOT_FOLDER=/movies
-export RADARR_MONITOR_ADDED_MOVIES=true
-export RADARR_START_SEARCHING_ADDED_MOVIES=true
-export SYNC_INTERVAL_MINUTES=60
-```
-
-3. Run the script:
-```bash
-python main.py
-```
-
 ## Configuration Reference
 
 ### YAML Configuration (config.yml)
@@ -208,32 +184,6 @@ letterboxd:
 ### Tags and Filtering
 
 Movies from each list can be automatically tagged in Radarr. Filters can be applied globally or per-list to skip certain types of content.
-
-### Legacy Environment Variables
-
-For backwards compatibility, the following environment variables are still supported:
-
-| Variable                              | Required | Default | Description                      |
-|---------------------------------------|----------|---------|----------------------------------|
-| `RADARR_API_KEY`                      | Yes      | -       | Your Radarr API key              |
-| `LETTERBOXD_USERNAME`                 | Yes      | -       | Letterboxd username to sync      |
-| `RADARR_URL`                          | Yes      | -       | URL to your Radarr instance      |
-| `RADARR_QUALITY_PROFILE`              | Yes      | -       | Quality profile ID to use        |
-| `RADARR_ROOT_FOLDER`                  | Yes      | -       | Root folder path for movies      |
-| `RADARR_MONITOR_ADDED_MOVIES`         | No       | true    | Monitor added movies             |
-| `RADARR_START_SEARCHING_ADDED_MOVIES` | No       | true    | Start searching for added movies |
-| `SYNC_INTERVAL_MINUTES`               | No       | 60      | Minutes between sync operations  |
-
-## Network Configuration
-
-### If Radarr is on the same machine:
-- Use `http://localhost:7878` or `http://host.docker.internal:7878` (for Docker on Mac/Windows)
-
-### If Radarr is in the same Docker network:
-- Use the container name, e.g., `http://radarr:7878`
-
-### If Radarr is on another machine:
-- Use the machine's IP address, e.g., `http://192.168.1.100:7878`
 
 ## Data Persistence
 
