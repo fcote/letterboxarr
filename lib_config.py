@@ -2,10 +2,10 @@
 
 import os
 import sys
-
 import yaml
-from typing import Dict, List, Optional, Any
+
 from dataclasses import dataclass
+from typing import List, Optional
 
 
 @dataclass
