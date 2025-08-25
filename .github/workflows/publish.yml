@@ -61,12 +61,12 @@ jobs:
             type=semver,pattern={{major}}
             # Set edge tag for main branch
             type=edge,branch=main
-            # Set branch name for branches
-            type=ref,event=branch
+            # Set branch name for branches (sanitized)
+            type=ref,event=branch,suffix=-{{sha}}
             # Set PR number for pull requests
             type=ref,event=pr
-            # Set sha for commits
-            type=sha,prefix={{branch}}-,suffix=-{{date 'YYYYMMDD'}},format=short
+            # Set sha tag for commits (simplified)
+            type=sha,format=short,enable={{is_default_branch}}
           labels: |
             maintainer=${{ github.repository_owner }}
             org.opencontainers.image.title=Letterboxd to Radarr Sync
