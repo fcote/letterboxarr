@@ -9,3 +9,4 @@ data
 
 # Environment file
 .env
+config.yml

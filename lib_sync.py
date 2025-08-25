@@ -4,6 +4,7 @@ import time
 
 from lib_letterboxd import LetterboxdScraper
 from lib_radarr import RadarrAPI, MultipleMatchesError
+from lib_config import Config
 
 
 class LetterboxdRadarrSync:
@@ -15,13 +16,19 @@ class LetterboxdRadarrSync:
     # Filepath for processed movies
     PROCESSED_MOVIES_FILEPATH = './data/processed_movies.json'
 
-    def __init__(self, logger, letterboxd_username: str, radarr_url: str,
-                 radarr_api_key: str, quality_profile: int, root_folder: str,
-                 monitor_movies: bool = True, search_movies: bool = True):
+    def __init__(self, logger, config: Config):
         self.logger = logger
-        self.letterboxd = LetterboxdScraper(logger, letterboxd_username)
-        self.radarr = RadarrAPI(logger, radarr_url, radarr_api_key, quality_profile,
-                                root_folder, monitor_movies, search_movies)
+        self.config = config
+        self.letterboxd = LetterboxdScraper(logger)
+        self.radarr = RadarrAPI(
+            logger, 
+            config.radarr.url, 
+            config.radarr.api_key, 
+            config.radarr.quality_profile,
+            config.radarr.root_folder, 
+            config.radarr.monitor_added, 
+            config.radarr.search_added
+        )
         self.processed_movies = self._load_processed_movies()
 
     def _load_processed_movies(self) -> set:
@@ -49,16 +56,16 @@ class LetterboxdRadarrSync:
         """Perform a single sync operation"""
         self.logger.info("Starting sync operation")
 
-        # Get watchlist from Letterboxd
-        watchlist = self.letterboxd.get_watchlist()
+        # Get movies from all configured watch lists
+        movies = self.letterboxd.get_movies_from_watch_lists(self.config.letterboxd.watch)
 
-        if not watchlist:
-            self.logger.warning("No movies found in watchlist")
+        if not movies:
+            self.logger.warning("No movies found in any watch lists")
             return
 
         # Process each movie
         added_count = 0
-        for movie in watchlist:
+        for movie in movies:
             # Create unique identifier
             movie_id = f"{movie['title']}_{movie.get('year', 'unknown')}"
 
@@ -68,7 +75,7 @@ class LetterboxdRadarrSync:
                 continue
 
             # Search for movie in Radarr/TMDB
-            self.logger.info(f"Processing: {movie['title']} ({movie.get('year', 'N/A')})")
+            self.logger.info(f"Processing: {movie['title']} ({movie.get('year', 'N/A')}) - Tags: {movie.get('tags', [])}")
             radarr_movie = None
             try:
                 radarr_movie = self.radarr.search_movie(movie['title'], movie.get('year'))
@@ -83,8 +90,9 @@ class LetterboxdRadarrSync:
                 self.processed_movies.add(movie_id)
                 continue
 
-            # Add to Radarr
-            if self.radarr.add_movie(radarr_movie):
+            # Add to Radarr with tags
+            tags = movie.get('tags', [])
+            if self.radarr.add_movie(radarr_movie, tags):
                 added_count += 1
 
             # Mark as processed

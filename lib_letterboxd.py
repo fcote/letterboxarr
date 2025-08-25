@@ -1,37 +1,70 @@
 import re
 import time
 from typing import List, Dict, Optional
+from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
 
+from lib_config import WatchListItem, create_letterboxd_cookie_filters
+
 
 class LetterboxdScraper:
-    """Scrapes Letterboxd watchlist for movie information"""
+    """Scrapes Letterboxd for movie information from multiple sources"""
 
-    def __init__(self, logger, username: str):
+    def __init__(self, logger):
         self.logger = logger
-        self.username = username
-        self.base_url = f"https://letterboxd.com/{username}/watchlist"
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         })
 
-    def get_watchlist(self) -> List[Dict]:
-        """Fetch and parse the watchlist"""
-        movies = []
-        page = 1
+    def get_movies_from_watch_lists(self, watch_items: List[WatchListItem]) -> List[Dict]:
+        """Fetch and parse movies from multiple watch lists"""
+        all_movies = []
+        
+        for watch_item in watch_items:
+            self.logger.info(f"Processing watch list: {watch_item.path}")
+            movies = self._get_movies_from_path(watch_item)
+            
+            # Add tags to movies
+            for movie in movies:
+                movie['tags'] = watch_item.tags.copy()
+            
+            all_movies.extend(movies)
+        
+        # Remove duplicates based on letterboxd_slug
+        seen_slugs = set()
+        unique_movies = []
+        for movie in all_movies:
+            if movie['letterboxd_slug'] not in seen_slugs:
+                seen_slugs.add(movie['letterboxd_slug'])
+                unique_movies.append(movie)
+        
+        self.logger.info(f"Found {len(unique_movies)} unique movies across all watch lists")
+        return unique_movies
 
+    def _get_movies_from_path(self, watch_item: WatchListItem) -> List[Dict]:
+        """Get movies from a specific Letterboxd path"""
+        movies = []
+        url = f"https://letterboxd.com/{watch_item.path}/"
+        
+        # Set up filters as cookies if specified
+        if watch_item.filters:
+            cookie_filters = create_letterboxd_cookie_filters(watch_item.filters)
+            if cookie_filters:
+                self.session.cookies.set('filmFilter', cookie_filters, domain='letterboxd.com')
+        
+        page = 1
         while True:
-            url = f"{self.base_url}/page/{page}/"
-            self.logger.info(f"Fetching Letterboxd page {page}")
+            page_url = urljoin(url, f"page/{page}/")
+            self.logger.debug(f"Fetching page {page} from {watch_item.path}")
 
             try:
-                response = self.session.get(url)
+                response = self.session.get(page_url)
                 response.raise_for_status()
             except requests.RequestException as e:
-                self.logger.error(f"Error fetching Letterboxd page: {e}")
+                self.logger.error(f"Error fetching page {page} from {watch_item.path}: {e}")
                 break
 
             soup = BeautifulSoup(response.content, 'html.parser')
@@ -40,7 +73,7 @@ class LetterboxdScraper:
             movie_items = soup.find_all('div', attrs={'data-component-class': 'globals.comps.LazyPoster'})
 
             if not movie_items:
-                self.logger.info(f"No more movies found on page {page}")
+                self.logger.debug(f"No more movies found on page {page} of {watch_item.path}")
                 break
 
             for item in movie_items:
@@ -56,7 +89,7 @@ class LetterboxdScraper:
             page += 1
             time.sleep(1)  # Be respectful to the server
 
-        self.logger.info(f"Found {len(movies)} movies in watchlist")
+        self.logger.info(f"Found {len(movies)} movies in {watch_item.path}")
         return movies
 
     def get_movie_tmdb_id(self, letterboxd_slug: str) -> Optional[int]:
