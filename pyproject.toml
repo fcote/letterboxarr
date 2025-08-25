@@ -5,5 +5,6 @@ description = "Automatically sync your Letterboxd watchlist to your Radarr insta
 requires-python = ">=3.9"
 dependencies = [
     "requests==2.31.0",
-    "beautifulsoup4==4.12.2"
+    "beautifulsoup4==4.12.2",
+    "pyyaml==6.0.1"
 ]

@@ -80,8 +80,8 @@ class RadarrAPI:
             self.logger.error(f"Error fetching existing movies: {e}")
             return []
 
-    def add_movie(self, movie_data: Dict) -> bool:
-        """Add a movie to Radarr"""
+    def add_movie(self, movie_data: Dict, tags: List[str] = None) -> bool:
+        """Add a movie to Radarr with optional tags"""
         # Check if movie already exists
         existing = self.get_existing_movies()
         tmdb_id = movie_data.get('tmdbId')
@@ -102,6 +102,12 @@ class RadarrAPI:
                 'searchForMovie': self.search_movies
             }
         }
+
+        # Add tags if provided
+        if tags:
+            tag_ids = self._get_or_create_tag_ids(tags)
+            if tag_ids:
+                add_data['tags'] = tag_ids
 
         # Include additional data if available
         if 'imdbId' in movie_data:
@@ -142,3 +148,46 @@ class RadarrAPI:
         except requests.RequestException as e:
             self.logger.error(f"Error fetching root folders: {e}")
             return []
+
+    def get_tags(self) -> List[Dict]:
+        """Get all available tags"""
+        try:
+            response = self.session.get(f"{self.base_url}/api/v3/tag")
+            response.raise_for_status()
+            return response.json()
+        except requests.RequestException as e:
+            self.logger.error(f"Error fetching tags: {e}")
+            return []
+
+    def create_tag(self, tag_name: str) -> Optional[int]:
+        """Create a new tag and return its ID"""
+        try:
+            response = self.session.post(
+                f"{self.base_url}/api/v3/tag",
+                json={'label': tag_name}
+            )
+            response.raise_for_status()
+            tag_data = response.json()
+            self.logger.info(f"Created tag: {tag_name} (ID: {tag_data['id']})")
+            return tag_data['id']
+        except requests.RequestException as e:
+            self.logger.error(f"Error creating tag {tag_name}: {e}")
+            return None
+
+    def _get_or_create_tag_ids(self, tag_names: List[str]) -> List[int]:
+        """Get or create tag IDs for the given tag names"""
+        existing_tags = self.get_tags()
+        existing_tag_map = {tag['label'].lower(): tag['id'] for tag in existing_tags}
+        
+        tag_ids = []
+        for tag_name in tag_names:
+            tag_name_lower = tag_name.lower()
+            if tag_name_lower in existing_tag_map:
+                tag_ids.append(existing_tag_map[tag_name_lower])
+            else:
+                # Create new tag
+                tag_id = self.create_tag(tag_name)
+                if tag_id:
+                    tag_ids.append(tag_id)
+        
+        return tag_ids
