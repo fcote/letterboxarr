@@ -1,0 +1,58 @@
+# Letterboxarr Configuration File
+# Copy this to config.yml and customize for your setup
+
+---
+sync:
+  schedule:
+    interval_minutes: 60  # How often to check for new movies (in minutes)
+
+radarr:
+  url: http://radarr:7878      # Radarr instance URL
+  api_key: your-api-key-here   # Radarr API key (required)
+  quality_profile: 1           # Quality profile ID to use for added movies
+  root_folder: /movies         # Root folder path for movies
+  monitor_added: true          # Whether to monitor newly added movies
+  search_added: true           # Whether to start searching for newly added movies
+
+letterboxd:
+  filters:
+    # Global filters applied to all lists (can be overridden per-list)
+    skip_documentaries: false    # Skip documentary films
+    skip_short_films: false      # Skip short films
+    skip_unreleased: false       # Skip unreleased films
+    skip_tv_shows: true          # Skip TV shows/series
+  
+  watch:
+    # List of Letterboxd pages to monitor for movies
+    # Each item can be a simple string or a dictionary with filters/tags
+    
+    # Simple watchlist
+    - username/watchlist
+    
+    # Watchlist with custom filters and tags
+    - username/watchlist:
+        filters:                     # Override global filters for this list
+          skip_documentaries: true
+          skip_short_films: true
+        tags:                        # Tags to add to movies from this list
+          - watchlist
+          - high-priority
+    
+    # Collections, popular lists, etc.
+    - films/in/the-godfather-collection
+    - films/popular/this/year
+    - films/popular/this/decade
+    
+    # Actor, director, writer pages
+    - actor/daniel-day-lewis
+    - director/david-fincher
+    - writer/aaron-sorkin
+          
+# Filter cookie format reference:
+# Letterboxd uses these filter names in cookies:
+# - hide-shorts: Skip short films
+# - hide-tv: Skip TV shows
+# - hide-docs: Skip documentaries  
+# - hide-unreleased: Skip unreleased films
+# 
+# These are automatically converted from the filter settings above

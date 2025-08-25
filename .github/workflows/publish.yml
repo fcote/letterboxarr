@@ -59,18 +59,12 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            # Set edge tag for main branch
-            type=edge,branch=main
-            # Set branch name for branches
+            # Set branch name for branches (sanitized)
             type=ref,event=branch
-            # Set PR number for pull requests
-            type=ref,event=pr
-            # Set sha for commits
-            type=sha,prefix={{branch}}-,suffix=-{{date 'YYYYMMDD'}},format=short
           labels: |
             maintainer=${{ github.repository_owner }}
             org.opencontainers.image.title=Letterboxd to Radarr Sync
-            org.opencontainers.image.description=Automatically sync Letterboxd watchlist to Radarr
+            org.opencontainers.image.description=Automatically sync Letterboxd lists to Radarr
             org.opencontainers.image.vendor=${{ github.repository_owner }}
 
       # Build and push Docker image

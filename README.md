@@ -1,15 +1,18 @@
 # Letterboxarr : Letterboxd to Radarr Sync
 
-Automatically sync your Letterboxd watchlist to your Radarr instance. This script periodically checks your Letterboxd watchlist and adds any new movies to Radarr.
+Automatically sync your Letterboxd lists to your Radarr instance. This script periodically checks your configured Letterboxd lists and adds any new movies to Radarr.
 
 ## Features
 
-- 🎬 Scrapes Letterboxd watchlist (no API key needed)
+- 🎬 Scrapes multiple Letterboxd lists (watchlists, collections, actors, directors, etc.)
+- 🏷️ Automatic tag assignment to movies based on their source list
 - 🔄 Automatic periodic synchronization
 - 📝 Tracks processed movies to avoid duplicates
 - 🐳 Docker support for easy deployment
-- 🔍 Smart movie matching using title and year
-- ⚡ Configurable sync interval
+- 🔍 Smart movie matching using title and year, falling back to TMDB ID
+- ⚡ Configurable sync interval and filters
+- 🎭 Per-list filtering (skip documentaries, short films, etc.)
+- ⚙️ YAML configuration file support
 
 ## Prerequisites
 
@@ -44,11 +47,48 @@ curl -H "X-Api-Key: YOUR_API_KEY" http://your-radarr-url:7878/api/v3/rootfolder
 
 Note the `path` of your movies folder.
 
+### 4. Create Configuration File
+
+Copy the example configuration:
+```bash
+cp config.example.yml config.yml
+```
+
+Edit `config.yml` with your settings:
+```yaml
+sync:
+  schedule:
+    interval_minutes: 60
+
+radarr:
+  url: http://radarr:7878
+  api_key: your-api-key-here
+  quality_profile: 1
+  root_folder: /movies
+  monitor_added: true
+  search_added: true
+
+letterboxd:
+  filters:
+    skip_documentaries: false
+    skip_short_films: false
+    skip_unreleased: false
+    skip_tv_shows: true
+  watch:
+    - username/watchlist:
+        tags:
+          - watchlist
+    - films/popular
+    - actor/daniel-day-lewis
+```
+
 ## Deployment Options
 
 ### Option 1: Docker Compose (Recommended)
 
-1. Create a docker-compose.yml file with the following content:
+1. Create your `config.yml` file (see setup section above)
+
+2. Create a docker-compose.yml file:
 
 ```yaml
 ---
@@ -57,28 +97,14 @@ services:
     image: fcote/letterboxarr:latest
     container_name: letterboxarr
     restart: unless-stopped
-    environment:
-      - RADARR_API_KEY=your_radarr_api_key_here
-      - LETTERBOXD_USERNAME=your_letterboxd_username_here
-      - RADARR_URL=http://radarr:7878             # Change to your Radarr URL
-      - RADARR_QUALITY_PROFILE=1                  # Change to your preferred quality profile ID
-      - RADARR_ROOT_FOLDER=/movies                # Change to your movies folder path
-      - RADARR_MONITOR_ADDED_MOVIES=true          # Monitor added movies
-      - RADARR_START_SEARCHING_ADDED_MOVIES=true  # Start searching for added movies
-      - SYNC_INTERVAL_MINUTES=60                  # How often to check for new movies
-
     volumes:
-      - ./data:/app/data  # Persistent storage for tracking processed movies
+      - ./config.yml:/app/config.yml  # Configuration file
+      - ./data:/app/data              # Persistent storage for tracking processed movies
 ```
 
-2. Build and run:
+3. Build and run:
 ```bash
 docker-compose up -d
-```
-
-3. Check logs:
-```bash
-docker-compose logs -f
 ```
 
 ### Option 2: Docker Run
@@ -89,19 +115,28 @@ docker build -t letterboxarr .
 docker run -d \
   --name letterboxarr \
   --restart unless-stopped \
-  -e RADARR_API_KEY=your_api_key \
-  -e LETTERBOXD_USERNAME=your_letterboxd_username \
-  -e RADARR_URL=http://192.168.1.100:7878 \
-  -e RADARR_QUALITY_PROFILE=4 \
-  -e RADARR_ROOT_FOLDER=/movies \
-  -e RADARR_MONITOR_ADDED_MOVIES=true \
-  -e RADARR_START_SEARCHING_ADDED_MOVIES=true \
-  -e SYNC_INTERVAL_MINUTES=60 \
+  -v $(pwd)/config.yml:/app/config.yml \
   -v $(pwd)/data:/app/data \
   letterboxarr
 ```
 
 ### Option 3: Local Python
+
+#### With Configuration File (Recommended)
+
+1. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+2. Create your `config.yml` file (see setup section above)
+
+3. Run the script:
+```bash
+python main.py
+```
+
+#### With Environment Variables (Legacy)
 
 1. Install dependencies:
 ```bash
@@ -125,9 +160,60 @@ export SYNC_INTERVAL_MINUTES=60
 python main.py
 ```
 
-## Configuration
+## Configuration Reference
 
-| Environment Variable                  | Required | Default | Description                      |
+### YAML Configuration (config.yml)
+
+```yaml
+sync:
+  schedule:
+    interval_minutes: 60          # How often to check for new movies
+
+radarr:
+  url: http://radarr:7878         # Radarr instance URL
+  api_key: your-api-key           # Your Radarr API key (required)
+  quality_profile: 1              # Quality profile ID to use
+  root_folder: /movies            # Root folder path for movies
+  monitor_added: true             # Monitor newly added movies
+  search_added: true              # Start searching for newly added movies
+
+letterboxd:
+  filters:                        # Global filters (can be overridden per-list)
+    skip_documentaries: false     # Skip documentary films
+    skip_short_films: false       # Skip short films
+    skip_unreleased: false        # Skip unreleased films
+    skip_tv_shows: true           # Skip TV shows/series
+  
+  watch:                          # List of Letterboxd pages to monitor
+    - username/watchlist          # Simple watchlist
+    - username/watchlist:         # Watchlist with custom settings
+        filters:
+          skip_documentaries: true
+        tags:
+          - watchlist
+    - films/popular               # Popular films
+    - actor/daniel-day-lewis      # Actor filmography
+    - director/david-fincher      # Director filmography
+```
+
+### Supported Letterboxd List Types
+
+- **User Lists**: `username/watchlist`, `username/films`, `username/diary`
+- **Collections**: `films/in/collection-name`
+- **Popular/Charts**: `films/popular`, `films/popular/this/year`
+- **People**: `actor/name`, `director/name`, `writer/name`
+- **Genres**: `films/genre/horror`, `films/genre/sci-fi`
+- **Custom Lists**: Any valid Letterboxd URL path
+
+### Tags and Filtering
+
+Movies from each list can be automatically tagged in Radarr. Filters can be applied globally or per-list to skip certain types of content.
+
+### Legacy Environment Variables
+
+For backwards compatibility, the following environment variables are still supported:
+
+| Variable                              | Required | Default | Description                      |
 |---------------------------------------|----------|---------|----------------------------------|
 | `RADARR_API_KEY`                      | Yes      | -       | Your Radarr API key              |
 | `LETTERBOXD_USERNAME`                 | Yes      | -       | Letterboxd username to sync      |
