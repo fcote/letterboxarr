@@ -1,13 +1,14 @@
 import json
 import os
 import time
+from threading import Thread, Event
 
 from lib_letterboxd import LetterboxdScraper
 from lib_radarr import RadarrAPI, MultipleMatchesError
 from lib_config import Config
 
 
-class LetterboxdRadarrSync:
+class LetterboxarrSync:
     """Main sync orchestrator"""
 
     # Data directory
@@ -34,8 +35,8 @@ class LetterboxdRadarrSync:
     def _load_processed_movies(self) -> set:
         """Load previously processed movies from file"""
         try:
-            if os.path.exists(LetterboxdRadarrSync.PROCESSED_MOVIES_FILEPATH):
-                with open(LetterboxdRadarrSync.PROCESSED_MOVIES_FILEPATH, 'r') as f:
+            if os.path.exists(LetterboxarrSync.PROCESSED_MOVIES_FILEPATH):
+                with open(LetterboxarrSync.PROCESSED_MOVIES_FILEPATH, 'r') as f:
                     return set(json.load(f))
         except Exception as e:
             self.logger.error(f"Error loading processed movies: {e}")
@@ -44,10 +45,10 @@ class LetterboxdRadarrSync:
     def _save_processed_movies(self):
         """Save processed movies to file"""
         try:
-            if not os.path.exists(LetterboxdRadarrSync.DATA_DIR):
-                os.makedirs(LetterboxdRadarrSync.DATA_DIR)
+            if not os.path.exists(LetterboxarrSync.DATA_DIR):
+                os.makedirs(LetterboxarrSync.DATA_DIR)
 
-            with open(LetterboxdRadarrSync.PROCESSED_MOVIES_FILEPATH, 'w') as f:
+            with open(LetterboxarrSync.PROCESSED_MOVIES_FILEPATH, 'w') as f:
                 json.dump(list(self.processed_movies), f)
         except Exception as e:
             self.logger.error(f"Error saving processed movies: {e}")
@@ -118,3 +119,19 @@ class LetterboxdRadarrSync:
 
             self.logger.info(f"Sleeping for {interval_minutes} minutes...")
             time.sleep(interval_minutes * 60)
+
+class LetterboxarrThread(Thread):
+    """Thread for running continuous sync"""
+
+    def __init__(self, sync_instance: LetterboxarrSync):
+        super().__init__()
+        self.sync_instance = sync_instance
+        self.daemon = True
+        self.stop_event = Event()
+
+    def run(self):
+        self.sync_instance.run_continuous(self.sync_instance.config.sync.interval_minutes)
+
+    def stop(self):
+        self.stop_event.set()
+        self.join(timeout=1)
