@@ -35,4 +35,4 @@ RUN mkdir -p ./data
 EXPOSE 7373 8080
 
 # Default command runs web server
-CMD ["python", "web_server.py"]
+CMD ["python", "main.py"]
