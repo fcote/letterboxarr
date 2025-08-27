@@ -13,6 +13,12 @@ class SyncConfig:
     """Sync configuration"""
     interval_minutes: int = 60
 
+    def to_dict(self) -> dict:
+        """Serialize sync config to dictionary"""
+        return {
+            "interval_minutes": self.interval_minutes
+        }
+
 
 @dataclass
 class RadarrConfig:
@@ -24,6 +30,17 @@ class RadarrConfig:
     monitor_added: bool = True
     search_added: bool = True
 
+    def to_dict(self) -> dict:
+        """Serialize Radarr config to dictionary"""
+        return {
+            "url": self.url,
+            "api_key": self.api_key,
+            "quality_profile": self.quality_profile,
+            "root_folder": self.root_folder,
+            "monitor_added": self.monitor_added,
+            "search_added": self.search_added
+        }
+
 
 @dataclass
 class LetterboxdFilters:
@@ -32,6 +49,15 @@ class LetterboxdFilters:
     skip_short_films: bool = False
     skip_unreleased: bool = False
     skip_tv_shows: bool = True
+
+    def to_dict(self) -> dict:
+        """Serialize filters to dictionary"""
+        return {
+            "skip_documentaries": self.skip_documentaries,
+            "skip_short_films": self.skip_short_films,
+            "skip_unreleased": self.skip_unreleased,
+            "skip_tv_shows": self.skip_tv_shows
+        }
 
 
 @dataclass
@@ -45,12 +71,30 @@ class WatchListItem:
         if self.tags is None:
             self.tags = []
 
+    def to_dict(self) -> dict:
+        """Serialize watch list item to dictionary"""
+        result = {
+            "path": self.path,
+        }
+        if self.tags:
+            result["tags"] = self.tags
+        if self.filters:
+            result["filters"] = self.filters.to_dict()
+        return result
+
 
 @dataclass
 class LetterboxdConfig:
     """Letterboxd configuration"""
     filters: LetterboxdFilters
     watch: List[WatchListItem]
+
+    def to_dict(self) -> dict:
+        """Serialize Letterboxd config to dictionary"""
+        return {
+            "filters": self.filters.to_dict(),
+            "watch": [item.to_dict() for item in self.watch]
+        }
 
 
 @dataclass
@@ -59,6 +103,14 @@ class Config:
     sync: SyncConfig
     radarr: RadarrConfig
     letterboxd: LetterboxdConfig
+
+    def to_dict(self) -> dict:
+        """Serialize configuration to dictionary"""
+        return {
+            "sync": self.sync.to_dict(),
+            "radarr": self.radarr.to_dict(),
+            "letterboxd": self.letterboxd.to_dict()
+        }
 
 
 class ConfigLoader:
@@ -82,7 +134,7 @@ class ConfigLoader:
         # Parse sync config
         sync_data = config_data['sync']
         sync_config = SyncConfig(
-            interval_minutes=sync_data.get('schedule', {}).get('interval_minutes', 60)
+            interval_minutes=sync_data.get('interval_minutes', 60)
         )
         
         # Parse radarr config
@@ -111,31 +163,23 @@ class ConfigLoader:
         # Parse watch list
         watch_list = []
         for watch_item in letterboxd_data.get('watch', []):
-            if isinstance(watch_item, str):
-                # Simple string format
-                watch_list.append(WatchListItem(
-                    path=watch_item,
-                    filters=global_filters
-                ))
-            elif isinstance(watch_item, dict):
-                # Dictionary format with filters/tags
-                for path, config in watch_item.items():
-                    item_filters = None
-                    if 'filters' in config:
-                        filter_data = config['filters']
-                        item_filters = LetterboxdFilters(
-                            skip_documentaries=filter_data.get('skip_documentaries', global_filters.skip_documentaries),
-                            skip_short_films=filter_data.get('skip_short_films', global_filters.skip_short_films),
-                            skip_unreleased=filter_data.get('skip_unreleased', global_filters.skip_unreleased),
-                            skip_tv_shows=filter_data.get('skip_tv_shows', global_filters.skip_tv_shows)
-                        )
-                    
-                    tags = config.get('tags', [])
-                    watch_list.append(WatchListItem(
-                        path=path,
-                        filters=item_filters,
-                        tags=tags
-                    ))
+            # Dictionary format with filters/tags
+            item_filters = None
+            if 'filters' in watch_item:
+                filter_data = watch_item.get('filters')
+                item_filters = LetterboxdFilters(
+                    skip_documentaries=filter_data.get('skip_documentaries', global_filters.skip_documentaries),
+                    skip_short_films=filter_data.get('skip_short_films', global_filters.skip_short_films),
+                    skip_unreleased=filter_data.get('skip_unreleased', global_filters.skip_unreleased),
+                    skip_tv_shows=filter_data.get('skip_tv_shows', global_filters.skip_tv_shows)
+                )
+
+            tags = watch_item.get('tags', [])
+            watch_list.append(WatchListItem(
+                path=watch_item.get('path'),
+                filters=item_filters,
+                tags=tags
+            ))
         
         letterboxd_config = LetterboxdConfig(
             filters=global_filters,

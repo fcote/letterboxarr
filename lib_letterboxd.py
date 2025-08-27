@@ -25,7 +25,7 @@ class LetterboxdScraper:
         
         for watch_item in watch_items:
             self.logger.info(f"Processing watch list: {watch_item.path}")
-            movies = self._get_movies_from_path(watch_item)
+            movies = self.get_movies_from_path(watch_item)
             
             # Add tags to movies
             for movie in movies:
@@ -44,7 +44,7 @@ class LetterboxdScraper:
         self.logger.info(f"Found {len(unique_movies)} unique movies across all watch lists")
         return unique_movies
 
-    def _get_movies_from_path(self, watch_item: WatchListItem) -> List[Dict]:
+    def get_movies_from_path(self, watch_item: WatchListItem, limit: Optional[int] = None) -> List[Dict]:
         """Get movies from a specific Letterboxd path"""
         movies = []
         url = f"https://letterboxd.com/{watch_item.path}/"
@@ -80,6 +80,9 @@ class LetterboxdScraper:
                 movie_data = self._extract_movie_data(item)
                 if movie_data:
                     movies.append(movie_data)
+
+            if limit and len(movies) >= limit:
+                break
 
             # Check if there's a next page
             next_page = soup.find('a', class_='next')

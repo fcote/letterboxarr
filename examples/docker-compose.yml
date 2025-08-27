@@ -4,6 +4,12 @@ services:
     image: fcote/letterboxarr:latest
     container_name: letterboxarr
     restart: unless-stopped
+    ports:
+      - "7373:7373"  # Web interface
     volumes:
-      - ./config.yml:/app/config.yml  # Configuration file
+      - ./config.yml:/app/config.yml  # Configuration file (read-only)
       - ./data:/app/data              # Persistent storage for tracking processed movies
+    environment:
+      - SECRET_KEY=${SECRET_KEY:-your-secret-key-change-this-in-production}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
