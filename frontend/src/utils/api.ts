@@ -1,10 +1,8 @@
 import axios, { AxiosResponse } from 'axios';
 import { Config, LoginCredentials, Token, WatchItem, WatchItemMovies, LetterboxdTestResult } from '../types';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:7373/api';
-
 const api = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: '/api',
 });
 
 // Request interceptor to add auth token
