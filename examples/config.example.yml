@@ -3,8 +3,7 @@
 
 ---
 sync:
-  schedule:
-    interval_minutes: 60  # How often to check for new movies (in minutes)
+  interval_minutes: 60  # How often to check for new movies (in minutes)
 
 radarr:
   url: http://radarr:7878      # Radarr instance URL
@@ -27,26 +26,26 @@ letterboxd:
     # Each item can be a simple string or a dictionary with filters/tags
     
     # Simple watchlist
-    - username/watchlist
+    - path: username/watchlist
     
     # Watchlist with custom filters and tags
-    - username/watchlist:
-        filters:                     # Override global filters for this list
-          skip_documentaries: true
-          skip_short_films: true
-        tags:                        # Tags to add to movies from this list
-          - watchlist
-          - high-priority
+    - path: username/watchlist
+      filters:                     # Override global filters for this list
+        skip_documentaries: true
+        skip_short_films: true
+      tags:                        # Tags to add to movies from this list
+        - watchlist
+        - high-priority
     
     # Collections, popular lists, etc.
-    - films/in/the-godfather-collection
-    - films/popular/this/year
-    - films/popular/this/decade
+    - path: films/in/the-godfather-collection
+    - path: films/popular/this/year
+    - path: films/popular/this/decade
     
     # Actor, director, writer pages
-    - actor/daniel-day-lewis
-    - director/david-fincher
-    - writer/aaron-sorkin
+    - path: actor/daniel-day-lewis
+    - path: director/david-fincher
+    - path: writer/aaron-sorkin
           
 # Filter cookie format reference:
 # Letterboxd uses these filter names in cookies:

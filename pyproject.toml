@@ -4,7 +4,11 @@ version = "1.0.0"
 description = "Automatically sync your Letterboxd watchlist to your Radarr instance"
 requires-python = ">=3.9"
 dependencies = [
-    "requests==2.31.0",
+    "requests==2.32.4",
     "beautifulsoup4==4.12.2",
-    "pyyaml==6.0.1"
+    "pyyaml==6.0.1",
+    "fastapi==0.104.1",
+    "uvicorn[standard]==0.24.0",
+    "python-jose[cryptography]==3.4.0",
+    "passlib[bcrypt]==1.7.4",
 ]

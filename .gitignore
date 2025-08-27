@@ -10,3 +10,7 @@ data
 # Environment file
 .env
 config.yml
+
+# Frontend build
+frontend/build
+frontend/node_modules
