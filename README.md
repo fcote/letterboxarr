@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="frontend/public/assets/icon.png" alt="Letterboxarr Logo" width="100">
+<img src="frontend/public/assets/logo.svg" alt="Letterboxarr Logo" width="100">
 
 # Letterboxarr
 
