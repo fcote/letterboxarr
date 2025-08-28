@@ -343,10 +343,11 @@ async def get_status():
 # Serve static files for frontend (only if built)
 if Path("frontend/build").exists() and Path("frontend/build/static").exists():
     context.app.mount("/static", StaticFiles(directory="frontend/build/static"), name="static")
+    context.app.mount("/assets", StaticFiles(directory="frontend/build/assets"), name="assets")
 
     @context.app.get("/{path:path}")
     async def serve_frontend(path: str):
         # Serve React app for all non-API routes
-        if not path.startswith("api/") and Path("frontend/build/index.html").exists():
+        if not path.startswith("api/") and not path.startswith("assets/") and Path("frontend/build/index.html").exists():
             return FileResponse("frontend/build/index.html")
         return None

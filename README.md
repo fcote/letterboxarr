@@ -1,4 +1,10 @@
-# Letterboxarr : Letterboxd to Radarr Sync
+<div align="center">
+
+<img src="frontend/public/assets/icon.png" alt="Letterboxarr Logo" width="100">
+
+# Letterboxarr
+
+</div>
 
 Automatically sync your Letterboxd lists to your Radarr instance. This script periodically checks your configured Letterboxd lists and adds any new movies to Radarr.
 
