@@ -50,6 +50,10 @@ class LetterboxdFilters:
     skip_unreleased: bool = False
     skip_tv_shows: bool = True
 
+    def __init__(self, **kwargs):
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
     def to_dict(self) -> dict:
         """Serialize filters to dictionary"""
         return {
@@ -66,6 +70,7 @@ class WatchListItem:
     path: str
     filters: Optional[LetterboxdFilters] = None
     tags: List[str] = None
+    auto_add: bool = True
     
     def __post_init__(self):
         if self.tags is None:
@@ -75,6 +80,7 @@ class WatchListItem:
         """Serialize watch list item to dictionary"""
         result = {
             "path": self.path,
+            "auto_add": self.auto_add,
         }
         if self.tags:
             result["tags"] = self.tags
@@ -175,10 +181,12 @@ class ConfigLoader:
                 )
 
             tags = watch_item.get('tags', [])
+            auto_add = watch_item.get('auto_add', True)
             watch_list.append(WatchListItem(
                 path=watch_item.get('path'),
                 filters=item_filters,
-                tags=tags
+                tags=tags,
+                auto_add=auto_add
             ))
         
         letterboxd_config = LetterboxdConfig(
@@ -265,7 +273,7 @@ def load_config_from_env(logger):
     )
 
     # Create simple watchlist from username
-    watch_items = [WatchListItem(path=f"{letterboxd_user}/watchlist")]
+    watch_items = [WatchListItem(path=f"{letterboxd_user}/watchlist", auto_add=True)]
 
     letterboxd_config = LetterboxdConfig(
         filters=letterboxd_filters,

@@ -27,19 +27,29 @@ class LetterboxdScraper:
             self.logger.info(f"Processing watch list: {watch_item.path}")
             movies = self.get_movies_from_path(watch_item)
             
-            # Add tags to movies
+            # Add tags and auto_add flag to movies
             for movie in movies:
                 movie['tags'] = watch_item.tags.copy()
+                movie['auto_add'] = watch_item.auto_add
             
             all_movies.extend(movies)
         
         # Remove duplicates based on letterboxd_slug
-        seen_slugs = set()
-        unique_movies = []
+        # Merge tags and auto_add flags from duplicate movies
+        movies_dict = {}
         for movie in all_movies:
-            if movie['letterboxd_slug'] not in seen_slugs:
-                seen_slugs.add(movie['letterboxd_slug'])
-                unique_movies.append(movie)
+            slug = movie['letterboxd_slug']
+            if slug not in movies_dict:
+                movies_dict[slug] = movie.copy()
+            else:
+                # Merge tags from duplicate movies
+                existing_tags = set(movies_dict[slug]['tags'])
+                new_tags = set(movie['tags'])
+                movies_dict[slug]['tags'] = list(existing_tags.union(new_tags))
+                # auto_add should be True if ANY source watch list has auto_add=True
+                movies_dict[slug]['auto_add'] = movies_dict[slug]['auto_add'] or movie['auto_add']
+        
+        unique_movies = list(movies_dict.values())
         
         self.logger.info(f"Found {len(unique_movies)} unique movies across all watch lists")
         return unique_movies

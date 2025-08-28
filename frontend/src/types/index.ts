@@ -39,6 +39,7 @@ export interface WatchItem {
   id?: number;
   path: string;
   tags: string[];
+  auto_add?: boolean;
   filters?: {
     skip_documentaries: boolean;
     skip_short_films: boolean;
@@ -51,6 +52,7 @@ export interface Movie {
   title: string;
   year: number;
   letterboxd_url: string;
+  letterboxd_slug: string;
   processed: boolean;
   tmdb_id?: string;
 }

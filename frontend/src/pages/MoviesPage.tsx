@@ -1,19 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { moviesAPI } from '../utils/api';
-import { WatchItemMovies } from '../types';
+import { WatchItemMovies, Movie } from '../types';
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
 import { 
   CheckCircleIcon, 
   ExclamationCircleIcon,
-  FilmIcon 
+  FilmIcon,
+  PlusIcon
 } from '@heroicons/react/24/outline';
 
 const MoviesPage: React.FC = () => {
   const { itemId } = useParams<{ itemId: string }>();
   const [movieData, setMovieData] = useState<WatchItemMovies | null>(null);
   const [loading, setLoading] = useState(true);
+  const [addingMovie, setAddingMovie] = useState<string | null>(null);
 
   useEffect(() => {
     if (itemId) {
@@ -29,6 +31,33 @@ const MoviesPage: React.FC = () => {
       toast.error('Failed to load movies');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAddMovie = async (movie: Movie) => {
+    if (!movieData) return;
+    
+    const movieKey = `${movie.title}_${movie.year}`;
+    setAddingMovie(movieKey);
+    
+    try {
+      await moviesAPI.addToRadarr({
+        title: movie.title,
+        year: movie.year,
+        letterboxd_slug: movie.letterboxd_slug,
+        tags: movieData.watch_item.tags
+      });
+      
+      toast.success(`${movie.title} added to Radarr successfully!`);
+      
+      // Refresh the movie data to show updated status
+      if (itemId) {
+        await loadMovies(parseInt(itemId));
+      }
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || `Failed to add ${movie.title} to Radarr`);
+    } finally {
+      setAddingMovie(null);
     }
   };
 
@@ -170,17 +199,36 @@ const MoviesPage: React.FC = () => {
                         )}
                       </div>
                     </div>
-                    <div className="flex items-center">
+                    <div className="flex items-center space-x-3">
                       {movie.processed ? (
                         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
                           <CheckCircleIcon className="h-3 w-3 mr-1" />
                           Added to Radarr
                         </span>
                       ) : (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                          <ExclamationCircleIcon className="h-3 w-3 mr-1" />
-                          Pending
-                        </span>
+                        <>
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                            <ExclamationCircleIcon className="h-3 w-3 mr-1" />
+                            Pending
+                          </span>
+                          <button
+                            onClick={() => handleAddMovie(movie)}
+                            disabled={addingMovie === `${movie.title}_${movie.year}`}
+                            className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {addingMovie === `${movie.title}_${movie.year}` ? (
+                              <>
+                                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
+                                Adding...
+                              </>
+                            ) : (
+                              <>
+                                <PlusIcon className="h-3 w-3 mr-1" />
+                                Add
+                              </>
+                            )}
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>

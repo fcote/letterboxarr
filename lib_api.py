@@ -14,7 +14,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel
 
-from lib_config import ConfigLoader, Config, WatchListItem
+from lib_config import ConfigLoader, Config, WatchListItem, LetterboxdFilters
 from lib_letterboxd import LetterboxdScraper
 from lib_sync import LetterboxarrSync, LetterboxarrThread
 
@@ -50,11 +50,19 @@ class WatchItemCreate(BaseModel):
     path: str
     tags: List[str] = []
     filters: Optional[Dict] = None
+    auto_add: bool = True
 
 class WatchItemUpdate(BaseModel):
     path: Optional[str] = None
     tags: Optional[List[str]] = None
     filters: Optional[Dict] = None
+    auto_add: Optional[bool] = None
+
+class MovieAddRequest(BaseModel):
+    title: str
+    year: int
+    letterboxd_slug: str
+    tags: List[str] = []
 
 class LetterboxarrAPIContext:
     def __init__(self):
@@ -80,9 +88,6 @@ class LetterboxarrAPIContext:
                 logger.warning("config.yml not found")
         except Exception as e:
             logger.error(f"Error loading configuration: {e}")
-
-        # Start sync thread if config loaded
-        self.restart_sync_thread()
 
     # Authentication functions
     @staticmethod
@@ -210,7 +215,8 @@ async def create_watch_item(item: WatchItemCreate, current_user: dict = Depends(
         context.current_config.letterboxd.watch.append(WatchListItem(
             path=item.path,
             tags=item.tags,
-            filters=item.filters
+            filters=LetterboxdFilters(**item.filters),
+            auto_add=item.auto_add
         ))
 
         # Save updated config
@@ -225,6 +231,38 @@ async def create_watch_item(item: WatchItemCreate, current_user: dict = Depends(
     except Exception as e:
         logger.error(f"Error creating watch item: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to create watch item: {str(e)}")
+
+@context.app.put("/api/watch-items/{item_id}")
+async def update_watch_item(item_id: int, item: WatchItemUpdate, current_user: dict = Depends(context.get_current_user)):
+    if not context.current_config or item_id >= len(context.current_config.letterboxd.watch):
+        raise HTTPException(status_code=404, detail="Watch item not found")
+
+    try:
+        # Get the existing watch item
+        existing_item = context.current_config.letterboxd.watch[item_id]
+        
+        # Update only the fields that were provided
+        if item.path is not None:
+            existing_item.path = item.path
+        if item.tags is not None:
+            existing_item.tags = item.tags
+        if item.filters is not None:
+            existing_item.filters = LetterboxdFilters(**item.filters)
+        if item.auto_add is not None:
+            existing_item.auto_add = item.auto_add
+
+        # Save updated config
+        with open(CONFIG_PATH, 'w') as f:
+            yaml.dump(context.current_config.to_dict(), f, default_flow_style=False)
+
+        # Reload configuration
+        context.load_config()
+
+        return {"message": "Watch item updated successfully"}
+
+    except Exception as e:
+        logger.error(f"Error updating watch item: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update watch item: {str(e)}")
 
 @context.app.delete("/api/watch-items/{item_id}")
 async def delete_watch_item(item_id: int, current_user: dict = Depends(context.get_current_user)):
@@ -257,6 +295,7 @@ async def test_letterboxd_url(request: WatchItemCreate, current_user: dict = Dep
             path=request.path,
             filters=request.filters,
             tags=request.tags,
+            auto_add=request.auto_add
         ), limit=5)
         return {
             "valid": True,
@@ -300,7 +339,8 @@ async def get_movies_by_watch_item(item_id: int, current_user: dict = Depends(co
             movies_with_status.append({
                 "title": movie["title"],
                 "year": movie["year"],
-                "letterboxd_url": movie.get("letterboxd_url", ""),
+                "letterboxd_url": f"https://letterboxd.com/film/{movie['letterboxd_slug']}/",
+                "letterboxd_slug": movie["letterboxd_slug"],
                 "processed": movie_key in processed_movies,
                 "tmdb_id": movie.get("tmdb_id")
             })
@@ -331,6 +371,42 @@ async def run_sync(background_tasks: BackgroundTasks, current_user: dict = Depen
 
     background_tasks.add_task(run_sync_task)
     return {"message": "Sync started in background"}
+
+@context.app.post("/api/movies/add")
+async def add_movie_to_radarr(request: MovieAddRequest, current_user: dict = Depends(context.get_current_user)):
+    if not context.sync_instance:
+        raise HTTPException(status_code=404, detail="Sync instance not available")
+
+    try:
+        from lib_radarr import MultipleMatchesError
+        
+        # Search for movie in Radarr/TMDB
+        radarr_movie = None
+        try:
+            radarr_movie = context.sync_instance.radarr.search_movie(request.title, request.year)
+        except MultipleMatchesError:
+            # Try to get TMDB ID from Letterboxd
+            tmdb_id = context.sync_instance.letterboxd.get_movie_tmdb_id(request.letterboxd_slug)
+            if tmdb_id:
+                radarr_movie = context.sync_instance.radarr.search_movie(request.title, request.year, tmdb_id)
+
+        if not radarr_movie:
+            raise HTTPException(status_code=404, detail=f"Movie '{request.title}' not found in TMDB")
+
+        # Add to Radarr with tags
+        if context.sync_instance.radarr.add_movie(radarr_movie, request.tags):
+            # Mark as processed
+            movie_id = f"{request.title}_{request.year}"
+            context.sync_instance.processed_movies.add(movie_id)
+            context.sync_instance._save_processed_movies()
+            
+            return {"message": f"Movie '{request.title}' added to Radarr successfully", "success": True}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to add movie to Radarr")
+
+    except Exception as e:
+        logger.error(f"Error adding movie to Radarr: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to add movie: {str(e)}")
 
 @context.app.get("/api/status")
 async def get_status():

@@ -8,21 +8,34 @@ import {
   TrashIcon, 
   CheckCircleIcon, 
   ExclamationCircleIcon,
-  FilmIcon 
+  FilmIcon,
+  PencilIcon
 } from '@heroicons/react/24/outline';
 
 const WatchItemsPage: React.FC = () => {
   const [watchItems, setWatchItems] = useState<WatchItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [showEditForm, setShowEditForm] = useState(false);
+  const [editingItem, setEditingItem] = useState<WatchItem | null>(null);
   const [newItem, setNewItem] = useState<Omit<WatchItem, 'id'>>({
     path: '',
     tags: [],
     filters: null,
+    auto_add: true,
+  });
+  const [editItem, setEditItem] = useState<Omit<WatchItem, 'id'>>({
+    path: '',
+    tags: [],
+    filters: null,
+    auto_add: true,
   });
   const [tagInput, setTagInput] = useState('');
+  const [editTagInput, setEditTagInput] = useState('');
   const [testResult, setTestResult] = useState<LetterboxdTestResult | null>(null);
+  const [editTestResult, setEditTestResult] = useState<LetterboxdTestResult | null>(null);
   const [testing, setTesting] = useState(false);
+  const [editTesting, setEditTesting] = useState(false);
 
   useEffect(() => {
     loadWatchItems();
@@ -54,6 +67,32 @@ const WatchItemsPage: React.FC = () => {
     });
   };
 
+  const removeEditTag = (index: number) => {
+    setEditItem({
+      ...editItem,
+      tags: editItem.tags.filter((_, i) => i !== index),
+    });
+  };
+
+  const handleAddEditTags = () => {
+    if (editTagInput.trim()) {
+      const tags = editTagInput.split(',').map(tag => tag.trim()).filter(tag => tag);
+      setEditItem({ ...editItem, tags: [...editItem.tags, ...tags] });
+      setEditTagInput('');
+    }
+  };
+
+  const handleEditClick = (item: WatchItem) => {
+    setEditingItem(item);
+    setEditItem({
+      path: item.path,
+      tags: [...(item.tags ?? [])],
+      filters: item.filters,
+      auto_add: item.auto_add ?? true,
+    });
+    setShowEditForm(true);
+  };
+
   const testLetterboxdUrl = async () => {
     if (!newItem.path) return;
     
@@ -68,17 +107,48 @@ const WatchItemsPage: React.FC = () => {
     }
   };
 
+  const testEditLetterboxdUrl = async () => {
+    if (!editItem.path) return;
+    
+    setEditTesting(true);
+    try {
+      const result = await letterboxdAPI.testWatchItem(editItem);
+      setEditTestResult(result);
+    } catch (error: any) {
+      setEditTestResult({ valid: false, error: error.message });
+    } finally {
+      setEditTesting(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       await watchItemsAPI.create(newItem);
       toast.success('Watch item added successfully!');
       setShowAddForm(false);
-      setNewItem({ path: '', tags: [], filters: null });
+      setNewItem({ path: '', tags: [], filters: null, auto_add: true });
       setTestResult(null);
       loadWatchItems();
     } catch (error: any) {
       toast.error(error.response?.data?.detail || 'Failed to add watch item');
+    }
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingItem) return;
+    
+    try {
+      await watchItemsAPI.update(editingItem.id!, editItem);
+      toast.success('Watch item updated successfully!');
+      setShowEditForm(false);
+      setEditingItem(null);
+      setEditItem({ path: '', tags: [], filters: null, auto_add: true });
+      setEditTestResult(null);
+      loadWatchItems();
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || 'Failed to update watch item');
     }
   };
 
@@ -194,6 +264,24 @@ const WatchItemsPage: React.FC = () => {
                     )}
                   </div>
 
+                  <div>
+                    <div className="flex items-center">
+                      <input
+                        id="auto-add"
+                        type="checkbox"
+                        checked={newItem.auto_add}
+                        onChange={(e) => setNewItem({ ...newItem, auto_add: e.target.checked })}
+                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                      />
+                      <label htmlFor="auto-add" className="ml-2 block text-sm text-gray-900">
+                        Automatically add movies to Radarr
+                      </label>
+                    </div>
+                    <p className="mt-1 text-sm text-gray-500">
+                      When disabled, movies will only be tracked but not automatically added to Radarr
+                    </p>
+                  </div>
+
                   <div className="flex justify-between">
                     <button
                       type="button"
@@ -230,7 +318,7 @@ const WatchItemsPage: React.FC = () => {
                       type="button"
                       onClick={() => {
                         setShowAddForm(false);
-                        setNewItem({ path: '', tags: [], filters: null });
+                        setNewItem({ path: '', tags: [], filters: null, auto_add: true });
                         setTestResult(null);
                       }}
                       className="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
@@ -242,6 +330,152 @@ const WatchItemsPage: React.FC = () => {
                       className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
                     >
                       Add Watch Item
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Edit Form Modal */}
+        {showEditForm && (
+          <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+            <div className="relative top-20 mx-auto p-5 border w-11/12 md:w-3/4 lg:w-1/2 shadow-lg rounded-md bg-white">
+              <div className="mt-3">
+                <h3 className="text-lg font-medium text-gray-900 mb-4">Edit Watch Item</h3>
+                <form onSubmit={handleEditSubmit} className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Letterboxd Path
+                    </label>
+                    <div className="mt-1 flex rounded-md shadow-sm">
+                      <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-gray-300 bg-gray-50 text-gray-500 text-sm">
+                        letterboxd.com/
+                      </span>
+                      <input
+                        type="text"
+                        value={editItem.path}
+                        onChange={(e) => setEditItem({ ...editItem, path: e.target.value })}
+                        className="flex-1 min-w-0 block w-full px-3 py-2 rounded-none rounded-r-md border-gray-300 focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                        placeholder="username/watchlist"
+                        required
+                      />
+                    </div>
+                    <p className="mt-2 text-sm text-gray-500">
+                      Examples: username/watchlist, films/popular, actor/daniel-day-lewis
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Tags (optional)
+                    </label>
+                    <div className="mt-1 flex rounded-md shadow-sm">
+                      <input
+                        type="text"
+                        value={editTagInput}
+                        onChange={(e) => setEditTagInput(e.target.value)}
+                        onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddEditTags())}
+                        className="flex-1 min-w-0 block w-full px-3 py-2 rounded-l-md border-gray-300 focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                        placeholder="Add tags separated by commas"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleAddEditTags}
+                        className="inline-flex items-center px-3 py-2 border border-l-0 border-gray-300 rounded-r-md bg-gray-50 text-gray-500 text-sm hover:bg-gray-100"
+                      >
+                        Add
+                      </button>
+                    </div>
+                    {editItem.tags.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {editItem.tags.map((tag, index) => (
+                          <span
+                            key={index}
+                            className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800"
+                          >
+                            {tag}
+                            <button
+                              type="button"
+                              onClick={() => removeEditTag(index)}
+                              className="flex-shrink-0 ml-1.5 h-4 w-4 rounded-full inline-flex items-center justify-center text-blue-400 hover:bg-blue-200 hover:text-blue-500 focus:outline-none focus:bg-blue-500 focus:text-white"
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <div className="flex items-center">
+                      <input
+                        id="edit-auto-add"
+                        type="checkbox"
+                        checked={editItem.auto_add}
+                        onChange={(e) => setEditItem({ ...editItem, auto_add: e.target.checked })}
+                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                      />
+                      <label htmlFor="edit-auto-add" className="ml-2 block text-sm text-gray-900">
+                        Automatically add movies to Radarr
+                      </label>
+                    </div>
+                    <p className="mt-1 text-sm text-gray-500">
+                      When disabled, movies will only be tracked but not automatically added to Radarr
+                    </p>
+                  </div>
+
+                  <div className="flex justify-between">
+                    <button
+                      type="button"
+                      onClick={testEditLetterboxdUrl}
+                      disabled={!editItem.path || editTesting}
+                      className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+                    >
+                      {editTesting ? 'Testing...' : 'Test URL'}
+                    </button>
+                    
+                    {editTestResult && (
+                      <div className="flex items-center">
+                        {editTestResult.valid ? (
+                          <div className="flex items-center text-green-600">
+                            <CheckCircleIcon className="h-5 w-5 mr-2" />
+                            <span className="text-sm">
+                              Valid ({editTestResult.movie_count} movies found)
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center text-red-600">
+                            <ExclamationCircleIcon className="h-5 w-5 mr-2" />
+                            <span className="text-sm">
+                              Invalid: {editTestResult.error}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex justify-end space-x-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowEditForm(false);
+                        setEditingItem(null);
+                        setEditItem({ path: '', tags: [], filters: null, auto_add: true });
+                        setEditTestResult(null);
+                      }}
+                      className="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                    >
+                      Update Watch Item
                     </button>
                   </div>
                 </form>
@@ -273,18 +507,21 @@ const WatchItemsPage: React.FC = () => {
                             <p className="text-sm font-medium text-gray-900 truncate">
                               letterboxd.com/{item.path}
                             </p>
-                            {item.tags && item.tags.length > 0 && (
-                              <div className="mt-1 flex flex-wrap gap-1">
-                                {item.tags.map((tag, index) => (
-                                  <span
-                                    key={index}
-                                    className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800"
-                                  >
-                                    {tag}
-                                  </span>
-                                ))}
-                              </div>
-                            )}
+                            <div className="mt-1 flex items-center gap-2">
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                item.auto_add !== false ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                              }`}>
+                                {item.auto_add !== false ? 'Auto-add enabled' : 'Auto-add disabled'}
+                              </span>
+                              {item.tags && item.tags.length > 0 && item.tags.map((tag, index) => (
+                                <span
+                                  key={index}
+                                  className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800"
+                                >
+                                  {tag}
+                                </span>
+                              ))}
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -295,6 +532,12 @@ const WatchItemsPage: React.FC = () => {
                         >
                           View Movies
                         </a>
+                        <button
+                          onClick={() => handleEditClick(item)}
+                          className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-gray-600 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
+                        >
+                          <PencilIcon className="h-4 w-4" />
+                        </button>
                         <button
                           onClick={() => handleDelete(item.id!)}
                           className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-red-600 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"

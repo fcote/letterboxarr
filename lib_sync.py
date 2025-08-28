@@ -75,8 +75,11 @@ class LetterboxarrSync:
                 self.logger.debug(f"Skipping already processed: {movie['title']}")
                 continue
 
+            # Check if movie should be auto-added to Radarr
+            auto_add = movie.get('auto_add', True)
+            
             # Search for movie in Radarr/TMDB
-            self.logger.info(f"Processing: {movie['title']} ({movie.get('year', 'N/A')}) - Tags: {movie.get('tags', [])}")
+            self.logger.info(f"Processing: {movie['title']} ({movie.get('year', 'N/A')}) - Tags: {movie.get('tags', [])} - Auto-add: {auto_add}")
             radarr_movie = None
             try:
                 radarr_movie = self.radarr.search_movie(movie['title'], movie.get('year'))
@@ -91,13 +94,15 @@ class LetterboxarrSync:
                 self.processed_movies.add(movie_id)
                 continue
 
-            # Add to Radarr with tags
-            tags = movie.get('tags', [])
-            if self.radarr.add_movie(radarr_movie, tags):
-                added_count += 1
-
-            # Mark as processed
-            self.processed_movies.add(movie_id)
+            # Add to Radarr with tags only if auto_add is True
+            if auto_add:
+                tags = movie.get('tags', [])
+                if self.radarr.add_movie(radarr_movie, tags):
+                    added_count += 1
+                # Mark as processed
+                self.processed_movies.add(movie_id)
+            else:
+                self.logger.info(f"Skipping auto-add for: {movie['title']} (auto_add=False)")
 
             # Small delay between additions
             time.sleep(0.5)

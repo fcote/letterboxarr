@@ -53,6 +53,10 @@ export const watchItemsAPI = {
     const response = await api.post('/watch-items', item);
     return response.data;
   },
+  update: async (id: number, item: Partial<Omit<WatchItem, 'id'>>): Promise<{ message: string }> => {
+    const response = await api.put(`/watch-items/${id}`, item);
+    return response.data;
+  },
   delete: async (id: number): Promise<{ message: string }> => {
     const response = await api.delete(`/watch-items/${id}`);
     return response.data;
@@ -66,6 +70,10 @@ export const moviesAPI = {
   },
   getByWatchItem: async (itemId: number): Promise<WatchItemMovies> => {
     const response: AxiosResponse<WatchItemMovies> = await api.get(`/movies/by-watch-item/${itemId}`);
+    return response.data;
+  },
+  addToRadarr: async (movie: { title: string; year: number; letterboxd_slug: string; tags: string[] }): Promise<{ message: string; success: boolean }> => {
+    const response = await api.post('/movies/add', movie);
     return response.data;
   },
 };
