@@ -58,7 +58,10 @@ class LetterboxarrSync:
         self.logger.info("Starting sync operation")
 
         # Get movies from all configured watch lists
-        movies = self.letterboxd.get_movies_from_watch_lists(self.config.letterboxd.watch)
+        movies = self.letterboxd.get_movies_from_watch_lists(
+            watch_items=self.config.letterboxd.watch,
+            global_filters=self.config.letterboxd.filters
+        )
 
         if not movies:
             self.logger.warning("No movies found in any watch lists")

@@ -45,10 +45,10 @@ class RadarrConfig:
 @dataclass
 class LetterboxdFilters:
     """Letterboxd filter configuration"""
-    skip_documentaries: bool = False
-    skip_short_films: bool = False
-    skip_unreleased: bool = False
-    skip_tv_shows: bool = True
+    skip_documentaries: Optional[bool] = None
+    skip_short_films: Optional[bool] = None
+    skip_unreleased: Optional[bool] = None
+    skip_tv_shows: Optional[bool] = None
 
     def __init__(self, **kwargs):
         for key, value in kwargs.items():
@@ -56,12 +56,11 @@ class LetterboxdFilters:
 
     def to_dict(self) -> dict:
         """Serialize filters to dictionary"""
-        return {
-            "skip_documentaries": self.skip_documentaries,
-            "skip_short_films": self.skip_short_films,
-            "skip_unreleased": self.skip_unreleased,
-            "skip_tv_shows": self.skip_tv_shows
-        }
+        result = {}
+        for key, value in self.__dict__.items():
+            if value is not None:
+                result[key] = value
+        return result
 
 
 @dataclass

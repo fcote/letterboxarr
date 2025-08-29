@@ -36,6 +36,9 @@ const WatchItemsPage: React.FC = () => {
   const [editTestResult, setEditTestResult] = useState<LetterboxdTestResult | null>(null);
   const [testing, setTesting] = useState(false);
   const [editTesting, setEditTesting] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [deleting, setDeleting] = useState<number | null>(null);
 
   useEffect(() => {
     loadWatchItems();
@@ -123,6 +126,7 @@ const WatchItemsPage: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmitting(true);
     try {
       await watchItemsAPI.create(newItem);
       toast.success('Watch item added successfully!');
@@ -132,6 +136,8 @@ const WatchItemsPage: React.FC = () => {
       loadWatchItems();
     } catch (error: any) {
       toast.error(error.response?.data?.detail || 'Failed to add watch item');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -139,6 +145,7 @@ const WatchItemsPage: React.FC = () => {
     e.preventDefault();
     if (!editingItem) return;
     
+    setEditing(true);
     try {
       await watchItemsAPI.update(editingItem.id!, editItem);
       toast.success('Watch item updated successfully!');
@@ -149,17 +156,22 @@ const WatchItemsPage: React.FC = () => {
       loadWatchItems();
     } catch (error: any) {
       toast.error(error.response?.data?.detail || 'Failed to update watch item');
+    } finally {
+      setEditing(false);
     }
   };
 
   const handleDelete = async (id: number) => {
     if (window.confirm('Are you sure you want to delete this watch item?')) {
+      setDeleting(id);
       try {
         await watchItemsAPI.delete(id);
         toast.success('Watch item deleted successfully!');
         loadWatchItems();
       } catch (error: any) {
         toast.error(error.response?.data?.detail || 'Failed to delete watch item');
+      } finally {
+        setDeleting(null);
       }
     }
   };
@@ -212,7 +224,8 @@ const WatchItemsPage: React.FC = () => {
                         type="text"
                         value={newItem.path}
                         onChange={(e) => setNewItem({ ...newItem, path: e.target.value })}
-                        className="flex-1 min-w-0 block w-full px-3 py-2 rounded-none rounded-r-md border-gray-300 focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                        disabled={submitting}
+                        className="flex-1 min-w-0 block w-full px-3 py-2 rounded-none rounded-r-md border-gray-300 focus:ring-blue-500 focus:border-blue-500 sm:text-sm disabled:bg-gray-50 disabled:text-gray-500"
                         placeholder="username/watchlist"
                         required
                       />
@@ -271,7 +284,8 @@ const WatchItemsPage: React.FC = () => {
                         type="checkbox"
                         checked={newItem.auto_add}
                         onChange={(e) => setNewItem({ ...newItem, auto_add: e.target.checked })}
-                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                        disabled={submitting}
+                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded disabled:opacity-50"
                       />
                       <label htmlFor="auto-add" className="ml-2 block text-sm text-gray-900">
                         Automatically add movies to Radarr
@@ -286,7 +300,7 @@ const WatchItemsPage: React.FC = () => {
                     <button
                       type="button"
                       onClick={testLetterboxdUrl}
-                      disabled={!newItem.path || testing}
+                      disabled={!newItem.path || testing || submitting}
                       className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
                     >
                       {testing ? 'Testing...' : 'Test URL'}
@@ -327,9 +341,13 @@ const WatchItemsPage: React.FC = () => {
                     </button>
                     <button
                       type="submit"
-                      className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                      disabled={submitting}
+                      className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      Add Watch Item
+                      {submitting && (
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                      )}
+                      {submitting ? 'Adding...' : 'Add Watch Item'}
                     </button>
                   </div>
                 </form>
@@ -357,7 +375,8 @@ const WatchItemsPage: React.FC = () => {
                         type="text"
                         value={editItem.path}
                         onChange={(e) => setEditItem({ ...editItem, path: e.target.value })}
-                        className="flex-1 min-w-0 block w-full px-3 py-2 rounded-none rounded-r-md border-gray-300 focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                        disabled={editing}
+                        className="flex-1 min-w-0 block w-full px-3 py-2 rounded-none rounded-r-md border-gray-300 focus:ring-blue-500 focus:border-blue-500 sm:text-sm disabled:bg-gray-50 disabled:text-gray-500"
                         placeholder="username/watchlist"
                         required
                       />
@@ -416,7 +435,8 @@ const WatchItemsPage: React.FC = () => {
                         type="checkbox"
                         checked={editItem.auto_add}
                         onChange={(e) => setEditItem({ ...editItem, auto_add: e.target.checked })}
-                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                        disabled={editing}
+                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded disabled:opacity-50"
                       />
                       <label htmlFor="edit-auto-add" className="ml-2 block text-sm text-gray-900">
                         Automatically add movies to Radarr
@@ -431,7 +451,7 @@ const WatchItemsPage: React.FC = () => {
                     <button
                       type="button"
                       onClick={testEditLetterboxdUrl}
-                      disabled={!editItem.path || editTesting}
+                      disabled={!editItem.path || editTesting || editing}
                       className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
                     >
                       {editTesting ? 'Testing...' : 'Test URL'}
@@ -473,9 +493,13 @@ const WatchItemsPage: React.FC = () => {
                     </button>
                     <button
                       type="submit"
-                      className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                      disabled={editing}
+                      className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      Update Watch Item
+                      {editing && (
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                      )}
+                      {editing ? 'Updating...' : 'Update Watch Item'}
                     </button>
                   </div>
                 </form>
@@ -540,9 +564,14 @@ const WatchItemsPage: React.FC = () => {
                         </button>
                         <button
                           onClick={() => handleDelete(item.id!)}
-                          className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-red-600 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+                          disabled={deleting === item.id}
+                          className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-red-600 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          <TrashIcon className="h-4 w-4" />
+                          {deleting === item.id ? (
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-600"></div>
+                          ) : (
+                            <TrashIcon className="h-4 w-4" />
+                          )}
                         </button>
                       </div>
                     </div>

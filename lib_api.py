@@ -28,7 +28,7 @@ CONFIG_PATH = "config.yml"
 # Security
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-this-in-production")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+ACCESS_TOKEN_EXPIRE_DAYS = 15
 
 # Default admin credentials (should be changed in production)
 DEFAULT_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
@@ -49,7 +49,7 @@ class LoginRequest(BaseModel):
 class WatchItemCreate(BaseModel):
     path: str
     tags: List[str] = []
-    filters: Optional[Dict] = None
+    filters: Optional[Dict] = {}
     auto_add: bool = True
 
 class WatchItemUpdate(BaseModel):
@@ -105,12 +105,9 @@ class LetterboxarrAPIContext:
         return False
 
     @staticmethod
-    def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    def create_access_token(data: dict, expires_delta: timedelta):
         to_encode = data.copy()
-        if expires_delta:
-            expire = datetime.utcnow() + expires_delta
-        else:
-            expire = datetime.utcnow() + timedelta(minutes=15)
+        expire = datetime.utcnow() + expires_delta
         to_encode.update({"exp": expire})
         encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
         return encoded_jwt
@@ -160,9 +157,10 @@ async def login(login_request: LoginRequest):
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token_expires = timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
     access_token = context.create_access_token(
-        data={"sub": user["username"]}, expires_delta=access_token_expires
+        data={"sub": user["username"]},
+        expires_delta=access_token_expires
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
@@ -212,12 +210,16 @@ async def create_watch_item(item: WatchItemCreate, current_user: dict = Depends(
         raise HTTPException(status_code=404, detail="Configuration not found")
 
     try:
-        context.current_config.letterboxd.watch.append(WatchListItem(
+        watch_item = WatchListItem(
             path=item.path,
             tags=item.tags,
-            filters=LetterboxdFilters(**item.filters),
             auto_add=item.auto_add
-        ))
+        )
+
+        if item.filters:
+            watch_item.filters = LetterboxdFilters(**item.filters)
+
+        context.current_config.letterboxd.watch.append(watch_item)
 
         # Save updated config
         with open(CONFIG_PATH, 'w') as f:
@@ -289,14 +291,17 @@ async def delete_watch_item(item_id: int, current_user: dict = Depends(context.g
 @context.app.post("/api/test-watch-item")
 async def test_letterboxd_url(request: WatchItemCreate, current_user: dict = Depends(context.get_current_user)):
     try:
-        scraper = LetterboxdScraper(logger)
         # Test URL by attempting to scrape first few movies
-        movies = scraper.get_movies_from_path(WatchListItem(
+        item = WatchListItem(
             path=request.path,
             filters=request.filters,
             tags=request.tags,
             auto_add=request.auto_add
-        ), limit=5)
+        )
+        movies = context.sync_instance.letterboxd.get_movies_from_path(
+            watch_item=item,
+            global_filters=context.current_config.letterboxd.filters
+        )
         return {
             "valid": True,
             "movie_count": len(movies),
@@ -325,10 +330,10 @@ async def get_movies_by_watch_item(item_id: int, current_user: dict = Depends(co
 
     try:
         watch_item = context.current_config.letterboxd.watch[item_id]
-        if watch_item.filters is None:
-            watch_item.filters = context.current_config.letterboxd.filters
-        scraper = LetterboxdScraper(logger)
-        movies = scraper.get_movies_from_path(watch_item, limit=50)  # Limit for performance
+        movies = context.sync_instance.letterboxd.get_movies_from_path(
+            watch_item=watch_item,
+            global_filters=context.current_config.letterboxd.filters
+        )
 
         # Check which movies have been processed
         processed_movies = context.sync_instance.processed_movies if context.sync_instance else set()
