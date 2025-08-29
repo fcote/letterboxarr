@@ -90,6 +90,7 @@ jobs:
         with:
           draft: false
           prerelease: false
+          token: ${{ secrets.GH_TOKEN }}
           body: |
             ## Docker Images
             
@@ -101,8 +102,6 @@ jobs:
             
             ### Supported Platforms
             - linux/amd64
-            - linux/arm64
-            - linux/arm/v7
             
             ### What's Changed
             See the commit history for changes in this release.
