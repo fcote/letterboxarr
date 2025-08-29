@@ -41,7 +41,7 @@ const ConfigPage: React.FC = () => {
     return (
       <Layout>
         <div className="flex justify-center items-center h-64">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-blue"></div>
         </div>
       </Layout>
     );
@@ -50,37 +50,37 @@ const ConfigPage: React.FC = () => {
   return (
     <Layout>
       <div className="px-4 py-6 sm:px-0">
-        <div className="border-b border-gray-200 pb-5">
-          <h1 className="text-2xl font-bold leading-6 text-gray-900">Configuration</h1>
-          <p className="mt-2 max-w-4xl text-sm text-gray-500">
+        <div className="border-b border-dark-border pb-5">
+          <h1 className="text-2xl font-bold leading-6 text-dark-text-primary">Configuration</h1>
+          <p className="mt-2 max-w-4xl text-sm text-dark-text-muted">
             Configure your Radarr connection, sync settings, and Letterboxd filters.
           </p>
         </div>
 
         <form onSubmit={handleSubmit(onSubmit)} className="mt-6 space-y-8">
           {/* Sync Configuration */}
-          <div className="bg-white shadow px-4 py-5 sm:rounded-lg sm:p-6">
+          <div className="card px-4 py-5 sm:p-6">
             <div className="md:grid md:grid-cols-3 md:gap-6">
               <div className="md:col-span-1">
-                <h3 className="text-lg font-medium leading-6 text-gray-900">Sync Settings</h3>
-                <p className="mt-1 text-sm text-gray-500">
+                <h3 className="text-lg font-medium leading-6 text-dark-text-primary">Sync Settings</h3>
+                <p className="mt-1 text-sm text-dark-text-muted">
                   Configure how often the sync runs.
                 </p>
               </div>
               <div className="mt-5 md:mt-0 md:col-span-2">
                 <div className="grid grid-cols-3 gap-6">
                   <div className="col-span-3 sm:col-span-2">
-                    <label htmlFor="sync.interval_minutes" className="block text-sm font-medium text-gray-700">
+                    <label htmlFor="sync.interval_minutes" className="block text-sm font-medium text-dark-text-secondary">
                       Sync Interval (minutes)
                     </label>
                     <input
                       type="number"
                       {...register('sync.interval_minutes', { required: true, min: 1 })}
-                      className="mt-1 focus:ring-blue-500 focus:border-blue-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md"
+                      className="input-field"
                       placeholder="60"
                     />
                     {errors.sync?.interval_minutes && (
-                      <p className="mt-2 text-sm text-red-600">Interval must be at least 1 minute</p>
+                      <p className="mt-2 text-sm text-brand-orange">Interval must be at least 1 minute</p>
                     )}
                   </div>
                 </div>
@@ -89,73 +89,73 @@ const ConfigPage: React.FC = () => {
           </div>
 
           {/* Radarr Configuration */}
-          <div className="bg-white shadow px-4 py-5 sm:rounded-lg sm:p-6">
+          <div className="card px-4 py-5 sm:p-6">
             <div className="md:grid md:grid-cols-3 md:gap-6">
               <div className="md:col-span-1">
-                <h3 className="text-lg font-medium leading-6 text-gray-900">Radarr Settings</h3>
-                <p className="mt-1 text-sm text-gray-500">
+                <h3 className="text-lg font-medium leading-6 text-dark-text-primary">Radarr Settings</h3>
+                <p className="mt-1 text-sm text-dark-text-muted">
                   Configure your Radarr instance connection and defaults.
                 </p>
               </div>
               <div className="mt-5 md:mt-0 md:col-span-2">
                 <div className="grid grid-cols-6 gap-6">
                   <div className="col-span-6">
-                    <label htmlFor="radarr.url" className="block text-sm font-medium text-gray-700">
+                    <label htmlFor="radarr.url" className="block text-sm font-medium text-dark-text-secondary">
                       Radarr URL
                     </label>
                     <input
                       type="url"
                       {...register('radarr.url', { required: true })}
-                      className="mt-1 focus:ring-blue-500 focus:border-blue-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md"
+                      className="input-field"
                       placeholder="https://radarr.example.com"
                     />
                     {errors.radarr?.url && (
-                      <p className="mt-2 text-sm text-red-600">Valid Radarr URL is required</p>
+                      <p className="mt-2 text-sm text-brand-orange">Valid Radarr URL is required</p>
                     )}
                   </div>
 
                   <div className="col-span-6">
-                    <label htmlFor="radarr.api_key" className="block text-sm font-medium text-gray-700">
+                    <label htmlFor="radarr.api_key" className="block text-sm font-medium text-dark-text-secondary">
                       API Key
                     </label>
                     <input
                       type="password"
                       {...register('radarr.api_key', { required: true })}
-                      className="mt-1 focus:ring-blue-500 focus:border-blue-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md"
+                      className="input-field"
                       placeholder="Enter your Radarr API key"
                     />
                     {errors.radarr?.api_key && (
-                      <p className="mt-2 text-sm text-red-600">API key is required</p>
+                      <p className="mt-2 text-sm text-brand-orange">API key is required</p>
                     )}
                   </div>
 
                   <div className="col-span-3">
-                    <label htmlFor="radarr.quality_profile" className="block text-sm font-medium text-gray-700">
+                    <label htmlFor="radarr.quality_profile" className="block text-sm font-medium text-dark-text-secondary">
                       Quality Profile ID
                     </label>
                     <input
                       type="number"
                       {...register('radarr.quality_profile', { required: true, min: 1 })}
-                      className="mt-1 focus:ring-blue-500 focus:border-blue-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md"
+                      className="input-field"
                       placeholder="1"
                     />
                     {errors.radarr?.quality_profile && (
-                      <p className="mt-2 text-sm text-red-600">Quality profile ID is required</p>
+                      <p className="mt-2 text-sm text-brand-orange">Quality profile ID is required</p>
                     )}
                   </div>
 
                   <div className="col-span-3">
-                    <label htmlFor="radarr.root_folder" className="block text-sm font-medium text-gray-700">
+                    <label htmlFor="radarr.root_folder" className="block text-sm font-medium text-dark-text-secondary">
                       Root Folder Path
                     </label>
                     <input
                       type="text"
                       {...register('radarr.root_folder', { required: true })}
-                      className="mt-1 focus:ring-blue-500 focus:border-blue-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md"
+                      className="input-field"
                       placeholder="/media/movies"
                     />
                     {errors.radarr?.root_folder && (
-                      <p className="mt-2 text-sm text-red-600">Root folder path is required</p>
+                      <p className="mt-2 text-sm text-brand-orange">Root folder path is required</p>
                     )}
                   </div>
 
@@ -166,9 +166,9 @@ const ConfigPage: React.FC = () => {
                           id="monitor_added"
                           type="checkbox"
                           {...register('radarr.monitor_added')}
-                          className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                          className="h-4 w-4 text-brand-blue focus:ring-brand-blue border-dark-border bg-dark-bg-tertiary rounded"
                         />
-                        <label htmlFor="monitor_added" className="ml-2 block text-sm text-gray-900">
+                        <label htmlFor="monitor_added" className="ml-2 block text-sm text-dark-text-primary">
                           Monitor added movies
                         </label>
                       </div>
@@ -177,9 +177,9 @@ const ConfigPage: React.FC = () => {
                           id="search_added"
                           type="checkbox"
                           {...register('radarr.search_added')}
-                          className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                          className="h-4 w-4 text-brand-blue focus:ring-brand-blue border-dark-border bg-dark-bg-tertiary rounded"
                         />
-                        <label htmlFor="search_added" className="ml-2 block text-sm text-gray-900">
+                        <label htmlFor="search_added" className="ml-2 block text-sm text-dark-text-primary">
                           Search for added movies
                         </label>
                       </div>
@@ -191,11 +191,11 @@ const ConfigPage: React.FC = () => {
           </div>
 
           {/* Letterboxd Configuration */}
-          <div className="bg-white shadow px-4 py-5 sm:rounded-lg sm:p-6">
+          <div className="card px-4 py-5 sm:p-6">
             <div className="md:grid md:grid-cols-3 md:gap-6">
               <div className="md:col-span-1">
-                <h3 className="text-lg font-medium leading-6 text-gray-900">Letterboxd Filters</h3>
-                <p className="mt-1 text-sm text-gray-500">
+                <h3 className="text-lg font-medium leading-6 text-dark-text-primary">Letterboxd Filters</h3>
+                <p className="mt-1 text-sm text-dark-text-muted">
                   Global filters applied to all watch lists (can be overridden per list).
                 </p>
               </div>
@@ -208,7 +208,7 @@ const ConfigPage: React.FC = () => {
                       {...register('letterboxd.filters.skip_documentaries')}
                       className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                     />
-                    <label htmlFor="skip_documentaries" className="ml-3 block text-sm text-gray-900">
+                    <label htmlFor="skip_documentaries" className="ml-3 block text-sm text-dark-text-primary">
                       Skip documentaries
                     </label>
                   </div>
@@ -219,7 +219,7 @@ const ConfigPage: React.FC = () => {
                       {...register('letterboxd.filters.skip_short_films')}
                       className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                     />
-                    <label htmlFor="skip_short_films" className="ml-3 block text-sm text-gray-900">
+                    <label htmlFor="skip_short_films" className="ml-3 block text-sm text-dark-text-primary">
                       Skip short films
                     </label>
                   </div>
@@ -230,7 +230,7 @@ const ConfigPage: React.FC = () => {
                       {...register('letterboxd.filters.skip_unreleased')}
                       className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                     />
-                    <label htmlFor="skip_unreleased" className="ml-3 block text-sm text-gray-900">
+                    <label htmlFor="skip_unreleased" className="ml-3 block text-sm text-dark-text-primary">
                       Skip unreleased films
                     </label>
                   </div>
@@ -241,7 +241,7 @@ const ConfigPage: React.FC = () => {
                       {...register('letterboxd.filters.skip_tv_shows')}
                       className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                     />
-                    <label htmlFor="skip_tv_shows" className="ml-3 block text-sm text-gray-900">
+                    <label htmlFor="skip_tv_shows" className="ml-3 block text-sm text-dark-text-primary">
                       Skip TV shows
                     </label>
                   </div>
@@ -254,7 +254,7 @@ const ConfigPage: React.FC = () => {
             <button
               type="submit"
               disabled={saving}
-              className="ml-3 inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+              className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {saving ? 'Saving...' : 'Save Configuration'}
             </button>

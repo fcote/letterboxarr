@@ -9,9 +9,32 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background-color: #0F172A;
+  color: #F8FAFC;
 }
 
 code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-transparent text-brand-green border border-brand-green font-medium px-4 py-2 rounded-md hover:opacity-90 transition-all duration-200;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 8px 32px rgba(255, 107, 53, 0.2);
+  }
+  
+  .btn-secondary {
+    @apply bg-dark-bg-tertiary text-dark-text-primary border border-dark-border hover:bg-dark-border transition-colors px-4 py-2 rounded-md;
+  }
+  
+  .card {
+    @apply bg-dark-bg-secondary border border-dark-border rounded-lg shadow-lg;
+  }
+  
+  .input-field {
+    @apply bg-dark-bg-tertiary border border-dark-border text-dark-text-primary placeholder-dark-text-muted focus:border-brand-blue focus:ring-1 focus:ring-brand-blue rounded-md px-3 py-2;
+  }
 }

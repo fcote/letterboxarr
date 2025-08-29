@@ -180,7 +180,7 @@ const WatchItemsPage: React.FC = () => {
     return (
       <Layout>
         <div className="flex justify-center items-center h-64">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-blue"></div>
         </div>
       </Layout>
     );
@@ -189,35 +189,35 @@ const WatchItemsPage: React.FC = () => {
   return (
     <Layout>
       <div className="px-4 py-6 sm:px-0">
-        <div className="border-b border-gray-200 pb-5 flex justify-between items-center">
+        <div className="border-b border-dark-border pb-5 flex justify-between items-center">
           <div>
-            <h1 className="text-2xl font-bold leading-6 text-gray-900">Watch Items</h1>
-            <p className="mt-2 max-w-4xl text-sm text-gray-500">
+            <h1 className="text-2xl font-bold leading-6 text-dark-text-primary">Watch Items</h1>
+            <p className="mt-2 max-w-4xl text-sm text-dark-text-muted">
               Manage your Letterboxd lists to sync with Radarr.
             </p>
           </div>
           <button
             onClick={() => setShowAddForm(true)}
-            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            className="btn-primary flex"
           >
-            <PlusIcon className="h-4 w-4 mr-2" />
+            <PlusIcon className="w-4 mr-2" />
             Add Watch Item
           </button>
         </div>
 
         {/* Add Form Modal */}
         {showAddForm && (
-          <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-            <div className="relative top-20 mx-auto p-5 border w-11/12 md:w-3/4 lg:w-1/2 shadow-lg rounded-md bg-white">
+          <div className="fixed inset-0 bg-black bg-opacity-50 overflow-y-auto h-full w-full z-50">
+            <div className="relative top-20 mx-auto p-5 w-11/12 md:w-3/4 lg:w-1/2 shadow-lg rounded-md card">
               <div className="mt-3">
-                <h3 className="text-lg font-medium text-gray-900 mb-4">Add New Watch Item</h3>
+                <h3 className="text-lg font-medium text-dark-text-primary mb-4">Add New Watch Item</h3>
                 <form onSubmit={handleSubmit} className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700">
+                    <label className="block text-sm font-medium text-dark-text-secondary">
                       Letterboxd Path
                     </label>
                     <div className="mt-1 flex rounded-md shadow-sm">
-                      <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-gray-300 bg-gray-50 text-gray-500 text-sm">
+                      <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-dark-border bg-dark-bg-tertiary text-dark-text-muted text-sm">
                         letterboxd.com/
                       </span>
                       <input
@@ -225,18 +225,18 @@ const WatchItemsPage: React.FC = () => {
                         value={newItem.path}
                         onChange={(e) => setNewItem({ ...newItem, path: e.target.value })}
                         disabled={submitting}
-                        className="flex-1 min-w-0 block w-full px-3 py-2 rounded-none rounded-r-md border-gray-300 focus:ring-blue-500 focus:border-blue-500 sm:text-sm disabled:bg-gray-50 disabled:text-gray-500"
+                        className="input-field rounded-none rounded-r-md w-full disabled:opacity-50"
                         placeholder="username/watchlist"
                         required
                       />
                     </div>
-                    <p className="mt-2 text-sm text-gray-500">
+                    <p className="mt-2 text-sm text-dark-text-muted">
                       Examples: username/watchlist, films/popular, actor/daniel-day-lewis
                     </p>
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700">
+                    <label className="block text-sm font-medium text-dark-text-secondary">
                       Tags (optional)
                     </label>
                     <div className="mt-1 flex rounded-md shadow-sm">
@@ -245,13 +245,13 @@ const WatchItemsPage: React.FC = () => {
                         value={tagInput}
                         onChange={(e) => setTagInput(e.target.value)}
                         onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddTags())}
-                        className="flex-1 min-w-0 block w-full px-3 py-2 rounded-l-md border-gray-300 focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                        className="input-field rounded-l-md rounded-r-none w-full"
                         placeholder="Add tags separated by commas"
                       />
                       <button
                         type="button"
                         onClick={handleAddTags}
-                        className="inline-flex items-center px-3 py-2 border border-l-0 border-gray-300 rounded-r-md bg-gray-50 text-gray-500 text-sm hover:bg-gray-100"
+                        className="btn-secondary border-l-0 rounded-l-none"
                       >
                         Add
                       </button>
@@ -261,13 +261,13 @@ const WatchItemsPage: React.FC = () => {
                         {newItem.tags.map((tag, index) => (
                           <span
                             key={index}
-                            className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800"
+                            className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-brand-blue/20 text-brand-blue border border-brand-blue/30"
                           >
                             {tag}
                             <button
                               type="button"
                               onClick={() => removeTag(index)}
-                              className="flex-shrink-0 ml-1.5 h-4 w-4 rounded-full inline-flex items-center justify-center text-blue-400 hover:bg-blue-200 hover:text-blue-500 focus:outline-none focus:bg-blue-500 focus:text-white"
+                              className="flex-shrink-0 ml-1.5 h-4 w-4 rounded-full inline-flex items-center justify-center text-brand-blue/70 hover:bg-brand-blue/20 hover:text-brand-blue focus:outline-none focus:bg-brand-blue focus:text-white"
                             >
                               ×
                             </button>
@@ -285,9 +285,9 @@ const WatchItemsPage: React.FC = () => {
                         checked={newItem.auto_add}
                         onChange={(e) => setNewItem({ ...newItem, auto_add: e.target.checked })}
                         disabled={submitting}
-                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded disabled:opacity-50"
+                        className="h-4 w-4 text-brand-blue focus:ring-brand-blue border-dark-border bg-dark-bg-tertiary rounded disabled:opacity-50"
                       />
-                      <label htmlFor="auto-add" className="ml-2 block text-sm text-gray-900">
+                      <label htmlFor="auto-add" className="ml-2 block text-sm text-white">
                         Automatically add movies to Radarr
                       </label>
                     </div>
@@ -301,7 +301,7 @@ const WatchItemsPage: React.FC = () => {
                       type="button"
                       onClick={testLetterboxdUrl}
                       disabled={!newItem.path || testing || submitting}
-                      className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+                      className="btn-secondary text-sm disabled:opacity-50"
                     >
                       {testing ? 'Testing...' : 'Test URL'}
                     </button>
@@ -309,14 +309,14 @@ const WatchItemsPage: React.FC = () => {
                     {testResult && (
                       <div className="flex items-center">
                         {testResult.valid ? (
-                          <div className="flex items-center text-green-600">
+                          <div className="flex items-center text-brand-green">
                             <CheckCircleIcon className="h-5 w-5 mr-2" />
                             <span className="text-sm">
                               Valid ({testResult.movie_count} movies found)
                             </span>
                           </div>
                         ) : (
-                          <div className="flex items-center text-red-600">
+                          <div className="flex items-center text-brand-orange">
                             <ExclamationCircleIcon className="h-5 w-5 mr-2" />
                             <span className="text-sm">
                               Invalid: {testResult.error}
@@ -335,14 +335,14 @@ const WatchItemsPage: React.FC = () => {
                         setNewItem({ path: '', tags: [], filters: null, auto_add: true });
                         setTestResult(null);
                       }}
-                      className="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                      className="btn-secondary text-sm"
                     >
                       Cancel
                     </button>
                     <button
                       type="submit"
                       disabled={submitting}
-                      className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {submitting && (
                         <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
@@ -358,17 +358,17 @@ const WatchItemsPage: React.FC = () => {
 
         {/* Edit Form Modal */}
         {showEditForm && (
-          <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-            <div className="relative top-20 mx-auto p-5 border w-11/12 md:w-3/4 lg:w-1/2 shadow-lg rounded-md bg-white">
+          <div className="fixed inset-0 bg-black bg-opacity-50 overflow-y-auto h-full w-full z-50">
+            <div className="relative top-20 mx-auto p-5 w-11/12 md:w-3/4 lg:w-1/2 shadow-lg rounded-md card">
               <div className="mt-3">
-                <h3 className="text-lg font-medium text-gray-900 mb-4">Edit Watch Item</h3>
+                <h3 className="text-lg font-medium text-dark-text-primary mb-4">Edit Watch Item</h3>
                 <form onSubmit={handleEditSubmit} className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700">
+                    <label className="block text-sm font-medium text-dark-text-secondary">
                       Letterboxd Path
                     </label>
                     <div className="mt-1 flex rounded-md shadow-sm">
-                      <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-gray-300 bg-gray-50 text-gray-500 text-sm">
+                      <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-dark-border bg-dark-bg-tertiary text-dark-text-muted text-sm">
                         letterboxd.com/
                       </span>
                       <input
@@ -376,18 +376,18 @@ const WatchItemsPage: React.FC = () => {
                         value={editItem.path}
                         onChange={(e) => setEditItem({ ...editItem, path: e.target.value })}
                         disabled={editing}
-                        className="flex-1 min-w-0 block w-full px-3 py-2 rounded-none rounded-r-md border-gray-300 focus:ring-blue-500 focus:border-blue-500 sm:text-sm disabled:bg-gray-50 disabled:text-gray-500"
+                        className="input-field rounded-none rounded-r-md w-full disabled:opacity-50"
                         placeholder="username/watchlist"
                         required
                       />
                     </div>
-                    <p className="mt-2 text-sm text-gray-500">
+                    <p className="mt-2 text-sm text-dark-text-muted">
                       Examples: username/watchlist, films/popular, actor/daniel-day-lewis
                     </p>
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700">
+                    <label className="block text-sm font-medium text-dark-text-secondary">
                       Tags (optional)
                     </label>
                     <div className="mt-1 flex rounded-md shadow-sm">
@@ -396,13 +396,13 @@ const WatchItemsPage: React.FC = () => {
                         value={editTagInput}
                         onChange={(e) => setEditTagInput(e.target.value)}
                         onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddEditTags())}
-                        className="flex-1 min-w-0 block w-full px-3 py-2 rounded-l-md border-gray-300 focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                        className="input-field rounded-l-md rounded-r-none w-full"
                         placeholder="Add tags separated by commas"
                       />
                       <button
                         type="button"
                         onClick={handleAddEditTags}
-                        className="inline-flex items-center px-3 py-2 border border-l-0 border-gray-300 rounded-r-md bg-gray-50 text-gray-500 text-sm hover:bg-gray-100"
+                        className="btn-secondary border-l-0 rounded-l-none"
                       >
                         Add
                       </button>
@@ -412,13 +412,13 @@ const WatchItemsPage: React.FC = () => {
                         {editItem.tags.map((tag, index) => (
                           <span
                             key={index}
-                            className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800"
+                            className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-brand-blue/20 text-brand-blue border border-brand-blue/30"
                           >
                             {tag}
                             <button
                               type="button"
                               onClick={() => removeEditTag(index)}
-                              className="flex-shrink-0 ml-1.5 h-4 w-4 rounded-full inline-flex items-center justify-center text-blue-400 hover:bg-blue-200 hover:text-blue-500 focus:outline-none focus:bg-blue-500 focus:text-white"
+                              className="flex-shrink-0 ml-1.5 h-4 w-4 rounded-full inline-flex items-center justify-center text-brand-blue/70 hover:bg-brand-blue/20 hover:text-brand-blue focus:outline-none focus:bg-brand-blue focus:text-white"
                             >
                               ×
                             </button>
@@ -436,9 +436,9 @@ const WatchItemsPage: React.FC = () => {
                         checked={editItem.auto_add}
                         onChange={(e) => setEditItem({ ...editItem, auto_add: e.target.checked })}
                         disabled={editing}
-                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded disabled:opacity-50"
+                        className="h-4 w-4 text-brand-blue focus:ring-brand-blue border-dark-border bg-dark-bg-tertiary rounded disabled:opacity-50"
                       />
-                      <label htmlFor="edit-auto-add" className="ml-2 block text-sm text-gray-900">
+                      <label htmlFor="edit-auto-add" className="ml-2 block text-sm text-white">
                         Automatically add movies to Radarr
                       </label>
                     </div>
@@ -452,7 +452,7 @@ const WatchItemsPage: React.FC = () => {
                       type="button"
                       onClick={testEditLetterboxdUrl}
                       disabled={!editItem.path || editTesting || editing}
-                      className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+                      className="btn-secondary text-sm disabled:opacity-50"
                     >
                       {editTesting ? 'Testing...' : 'Test URL'}
                     </button>
@@ -460,14 +460,14 @@ const WatchItemsPage: React.FC = () => {
                     {editTestResult && (
                       <div className="flex items-center">
                         {editTestResult.valid ? (
-                          <div className="flex items-center text-green-600">
+                          <div className="flex items-center text-brand-green">
                             <CheckCircleIcon className="h-5 w-5 mr-2" />
                             <span className="text-sm">
                               Valid ({editTestResult.movie_count} movies found)
                             </span>
                           </div>
                         ) : (
-                          <div className="flex items-center text-red-600">
+                          <div className="flex items-center text-brand-orange">
                             <ExclamationCircleIcon className="h-5 w-5 mr-2" />
                             <span className="text-sm">
                               Invalid: {editTestResult.error}
@@ -487,14 +487,14 @@ const WatchItemsPage: React.FC = () => {
                         setEditItem({ path: '', tags: [], filters: null, auto_add: true });
                         setEditTestResult(null);
                       }}
-                      className="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                      className="btn-secondary text-sm"
                     >
                       Cancel
                     </button>
                     <button
                       type="submit"
                       disabled={editing}
-                      className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {editing && (
                         <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
@@ -512,35 +512,35 @@ const WatchItemsPage: React.FC = () => {
         <div className="mt-6">
           {watchItems.length === 0 ? (
             <div className="text-center py-12">
-              <FilmIcon className="mx-auto h-12 w-12 text-gray-400" />
-              <h3 className="mt-2 text-sm font-medium text-gray-900">No watch items</h3>
-              <p className="mt-1 text-sm text-gray-500">
+              <FilmIcon className="mx-auto h-12 w-12 text-dark-text-muted" />
+              <h3 className="mt-2 text-sm font-medium text-dark-text-primary">No watch items</h3>
+              <p className="mt-1 text-sm text-dark-text-muted">
                 Get started by adding a Letterboxd list to sync.
               </p>
             </div>
           ) : (
-            <div className="bg-white shadow overflow-hidden sm:rounded-md">
-              <ul className="divide-y divide-gray-200">
+            <div className="card overflow-hidden">
+              <ul className="divide-y divide-dark-border">
                 {watchItems.map((item) => (
                   <li key={item.id} className="px-6 py-4">
                     <div className="flex items-center justify-between">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center">
-                          <FilmIcon className="h-5 w-5 text-gray-400 mr-3" />
+                          <FilmIcon className="h-5 w-5 text-dark-text-muted mr-3" />
                           <div>
-                            <p className="text-sm font-medium text-gray-900 truncate">
+                            <p className="text-sm font-medium text-dark-text-primary truncate">
                               letterboxd.com/{item.path}
                             </p>
                             <div className="mt-1 flex items-center gap-2">
                               <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                                item.auto_add !== false ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                                item.auto_add !== false ? 'bg-brand-green/20 text-brand-green border border-brand-green/30' : 'bg-dark-bg-tertiary text-dark-text-muted border border-dark-border'
                               }`}>
                                 {item.auto_add !== false ? 'Auto-add enabled' : 'Auto-add disabled'}
                               </span>
                               {item.tags && item.tags.length > 0 && item.tags.map((tag, index) => (
                                 <span
                                   key={index}
-                                  className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800"
+                                  className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-brand-blue/20 text-brand-blue border border-brand-blue/30"
                                 >
                                   {tag}
                                 </span>
@@ -552,23 +552,23 @@ const WatchItemsPage: React.FC = () => {
                       <div className="flex items-center space-x-2">
                         <a
                           href={`/movies/${item.id}`}
-                          className="text-blue-600 hover:text-blue-900 text-sm font-medium"
+                          className="text-brand-blue hover:text-brand-blue/80 text-sm font-medium"
                         >
                           View Movies
                         </a>
                         <button
                           onClick={() => handleEditClick(item)}
-                          className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-gray-600 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
+                          className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-dark-text-muted hover:bg-dark-bg-tertiary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-blue"
                         >
                           <PencilIcon className="h-4 w-4" />
                         </button>
                         <button
                           onClick={() => handleDelete(item.id!)}
                           disabled={deleting === item.id}
-                          className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-red-600 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-red-500 hover:bg-brand-orange/10 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-orange disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           {deleting === item.id ? (
-                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-600"></div>
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-500"></div>
                           ) : (
                             <TrashIcon className="h-4 w-4" />
                           )}

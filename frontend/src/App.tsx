@@ -27,8 +27,8 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      <div className="min-h-screen flex items-center justify-center bg-dark-bg-primary">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-blue"></div>
       </div>
     );
   }
@@ -52,21 +52,22 @@ const App: React.FC = () => {
               toastOptions={{
                 duration: 4000,
                 style: {
-                  background: '#363636',
-                  color: '#fff',
+                  background: '#1E293B',
+                  color: '#F8FAFC',
+                  border: '1px solid #475569',
                 },
                 success: {
                   duration: 3000,
                   iconTheme: {
-                    primary: '#4ade80',
-                    secondary: '#fff',
+                    primary: '#00E676',
+                    secondary: '#F8FAFC',
                   },
                 },
                 error: {
                   duration: 5000,
                   iconTheme: {
-                    primary: '#ef4444',
-                    secondary: '#fff',
+                    primary: '#FF6B35',
+                    secondary: '#F8FAFC',
                   },
                 },
               }}
