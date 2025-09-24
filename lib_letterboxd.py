@@ -151,7 +151,7 @@ class LetterboxdScraper:
             soup = BeautifulSoup(response.content, 'html.parser')
 
             # Find movie posters/links
-            movie_items = soup.find_all('div', attrs={'data-component-class': 'globals.comps.LazyPoster'})
+            movie_items = soup.find_all('div', attrs={'data-component-class': 'LazyPoster'})
 
             if not movie_items:
                 self.logger.debug(f"No more movies found on page {page} of {watch_item.path}")
@@ -178,7 +178,8 @@ class LetterboxdScraper:
         self.logger.info(f"Found {len(movies)} movies in {watch_item.path}")
         
         # Save to cache
-        self._save_to_cache(cache_file_path, movies)
+        if len(movies) > 0:
+            self._save_to_cache(cache_file_path, movies)
         
         return movies
 
