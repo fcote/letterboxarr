@@ -6,7 +6,7 @@ import os
 from typing import List, Dict, Optional
 from urllib.parse import urljoin
 
-import requests
+from curl_cffi import requests
 from bs4 import BeautifulSoup
 
 from lib_config import WatchListItem, create_letterboxd_cookie_filters, LetterboxdFilters
@@ -17,10 +17,7 @@ class LetterboxdScraper:
 
     def __init__(self, logger, cache_dir: str = 'data/cache', cache_ttl: int = 3600):
         self.logger = logger
-        self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        })
+        self.session = requests.Session(impersonate="chrome")
         self.cache_dir = cache_dir
         self.cache_ttl = cache_ttl  # Cache TTL in seconds (default: 1 hour)
         
@@ -144,7 +141,7 @@ class LetterboxdScraper:
             try:
                 response = self.session.get(page_url)
                 response.raise_for_status()
-            except requests.RequestException as e:
+            except requests.RequestsError as e:
                 self.logger.error(f"Error fetching page {page} from {watch_item.path}: {e}")
                 break
 
@@ -189,7 +186,7 @@ class LetterboxdScraper:
         try:
             response = self.session.get(url)
             response.raise_for_status()
-        except requests.RequestException as e:
+        except requests.RequestsError as e:
             self.logger.error(f"Error fetching movie page: {e}")
             return None
 
