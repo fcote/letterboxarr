@@ -135,7 +135,7 @@ class LetterboxdScraper:
         
         page = 1
         while True:
-            page_url = urljoin(url, f"page/{page}/")
+            page_url = url if page == 1 else urljoin(url, f"page/{page}/")
             self.logger.debug(f"Fetching page {page} from {watch_item.path}")
 
             try:
