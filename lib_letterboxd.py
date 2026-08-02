@@ -3,6 +3,7 @@ import time
 import json
 import hashlib
 import os
+from threading import RLock
 from typing import List, Dict, Optional
 from urllib.parse import urljoin
 
@@ -12,15 +13,26 @@ from bs4 import BeautifulSoup
 from lib_config import WatchListItem, create_letterboxd_cookie_filters, LetterboxdFilters
 
 
+# Browser fingerprints to impersonate, tried in order. Letterboxd's bot
+# protection refuses some of them on member pages (a 403 on
+# /<user>/films/page/2/ while page 1 answers fine), and which ones are refused
+# changes over time, so a refused fingerprint falls through to the next.
+IMPERSONATIONS = ['chrome', 'chrome131', 'safari17_0']
+
+
 class LetterboxdScraper:
     """Scrapes Letterboxd for movie information from multiple sources"""
 
     def __init__(self, logger, cache_dir: str = 'data/cache', cache_ttl: int = 3600):
         self.logger = logger
-        self.session = requests.Session(impersonate="chrome")
+        self.impersonations = list(IMPERSONATIONS)
+        self.session = requests.Session(impersonate=self.impersonations[0])
         self.cache_dir = cache_dir
         self.cache_ttl = cache_ttl  # Cache TTL in seconds (default: 1 hour)
-        
+        # The session carries the filmFilter cookie, so only one crawl at a
+        # time: the API and the sync thread both share this scraper
+        self.crawl_lock = RLock()
+
         # Create cache directory if it doesn't exist
         if not os.path.exists(self.cache_dir):
             os.makedirs(self.cache_dir)
@@ -106,9 +118,46 @@ class LetterboxdScraper:
         self.logger.info(f"Found {len(unique_movies)} unique movies across all watch lists")
         return unique_movies
 
+    def _get(self, url: str):
+        """Fetch a Letterboxd page, falling back to another browser fingerprint on a 403
+
+        The working fingerprint is moved to the front so the rest of the crawl
+        stops paying for the refused ones.
+        """
+        response = None
+        for impersonate in list(self.impersonations):
+            response = self.session.get(url, impersonate=impersonate)
+            if response.status_code != 403:
+                self.impersonations.remove(impersonate)
+                self.impersonations.insert(0, impersonate)
+                break
+            self.logger.debug(f"Letterboxd refused fingerprint '{impersonate}' for {url}")
+
+        response.raise_for_status()
+        return response
+
+    def _set_film_filter(self, cookie_filters: str) -> None:
+        """Set the filmFilter cookie for the next requests, dropping any previous one
+
+        Letterboxd echoes the cookie back on the '.letterboxd.com' domain, so
+        setting a new value would otherwise leave the previous one in the jar and
+        keep filtering the listing with it.
+        """
+        for cookie in list(self.session.cookies.jar):
+            if cookie.name == 'filmFilter':
+                self.session.cookies.jar.clear(cookie.domain, cookie.path, cookie.name)
+
+        if cookie_filters:
+            self.session.cookies.set('filmFilter', cookie_filters, domain='letterboxd.com')
+
     def get_movies_from_path(self, watch_item: WatchListItem, global_filters: LetterboxdFilters,
                              limit: Optional[int] = None) -> List[Dict]:
         """Get movies from a specific Letterboxd path"""
+        with self.crawl_lock:
+            return self._crawl_path(watch_item, global_filters, limit)
+
+    def _crawl_path(self, watch_item: WatchListItem, global_filters: LetterboxdFilters,
+                    limit: Optional[int] = None) -> List[Dict]:
         # Check cache first
         cache_key = self._get_cache_key(watch_item, global_filters, limit)
         cache_file_path = self._get_cache_file_path(cache_key)
@@ -130,17 +179,15 @@ class LetterboxdScraper:
         else:
             cookie_filters = create_letterboxd_cookie_filters(global_filters)
 
-        if cookie_filters:
-            self.session.cookies.set('filmFilter', cookie_filters, domain='letterboxd.com')
-        
+        self._set_film_filter(cookie_filters)
+
         page = 1
         while True:
             page_url = url if page == 1 else urljoin(url, f"page/{page}/")
             self.logger.debug(f"Fetching page {page} from {watch_item.path}")
 
             try:
-                response = self.session.get(page_url)
-                response.raise_for_status()
+                response = self._get(page_url)
             except requests.RequestsError as e:
                 self.logger.error(f"Error fetching page {page} from {watch_item.path}: {e}")
                 break
@@ -184,8 +231,8 @@ class LetterboxdScraper:
         """Fetch TMDB ID for a movie from Letterboxd"""
         url = f"https://letterboxd.com/film/{letterboxd_slug}/"
         try:
-            response = self.session.get(url)
-            response.raise_for_status()
+            with self.crawl_lock:
+                response = self._get(url)
         except requests.RequestsError as e:
             self.logger.error(f"Error fetching movie page: {e}")
             return None
