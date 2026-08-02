@@ -65,7 +65,7 @@ export const watchItemsAPI = {
     const response: AxiosResponse<WatchItemProgress> = await api.get(`/watch-items/${id}/progress`);
     return response.data;
   },
-  refresh: async (id: number): Promise<{ item_id: number; path: string; cleared: number }> => {
+  refresh: async (id: number): Promise<{ item_id: number; path: string; refreshed: number }> => {
     const response = await api.post(`/watch-items/${id}/refresh`);
     return response.data;
   },

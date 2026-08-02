@@ -1,11 +1,12 @@
 import time
-from threading import Lock, Thread, Event
+from threading import Event, Lock, Thread
 from typing import Dict, List, Optional, Tuple
 
 from lib_db import Database, get_database
 from lib_letterboxd import LetterboxdScraper
 from lib_radarr import RadarrAPI, MultipleMatchesError
 from lib_config import Config
+from lib_refresh import ListRefresher
 
 
 def movie_key(movie: Dict) -> str:
@@ -21,6 +22,7 @@ class LetterboxarrSync:
         self.config = config
         self.db = db or get_database(logger)
         self.letterboxd = LetterboxdScraper(logger, self.db)
+        self.refresher = ListRefresher(logger, config, self.letterboxd, self.db)
         self.radarr = RadarrAPI(
             logger,
             config.radarr.url,
@@ -44,8 +46,17 @@ class LetterboxarrSync:
         """Record a movie as handed to Radarr so later syncs skip it"""
         self.db.add_movie(movie_id, slug=slug, title=title, year=year, tags=tags)
 
-    def sync_once(self):
-        """Perform a single sync operation, recording it as a sync run"""
+    def sync_once(self, refresh: bool = False, max_age: Optional[float] = None):
+        """Perform a single sync operation, recording it as a sync run
+
+        With refresh, the watch lists are read from Letterboxd first, so what
+        goes to Radarr is what they hold now rather than what they held at the
+        last read. Failing to read them is not failing the sync: the stored
+        lists may still hold movies the last round did not get to.
+
+        The run is recorded around both halves, which is what makes "a sync is
+        in progress" mean the whole round to everything watching it.
+        """
         if not self.sync_lock.acquire(blocking=False):
             self.logger.info("A sync is already running, skipping this one")
             return
@@ -54,6 +65,11 @@ class LetterboxarrSync:
         added = considered = 0
         error = None
         try:
+            if refresh:
+                try:
+                    self.refresher.refresh_all(max_age)
+                except Exception as e:
+                    self.logger.error(f"Error refreshing the watch lists: {e}")
             added, considered = self._sync()
         except Exception as e:
             error = str(e)
@@ -129,31 +145,58 @@ class LetterboxarrSync:
         self.logger.info(f"Sync complete. Added {added_count} new movies")
         return added_count, len(movies)
 
-    def run_continuous(self, interval_minutes: int = 60):
-        """Run sync continuously at specified interval"""
-        self.logger.info(f"Starting continuous sync (interval: {interval_minutes} minutes)")
 
-        while True:
+class LetterboxarrThread(Thread):
+    """Runs a round on the configured interval: read the lists, then sync them
+
+    One interval covers both halves, and in that order, so a film added to a
+    watch list reaches Radarr in the same round rather than waiting for the
+    next one.
+
+    The wait between rounds is an Event rather than a sleep, so stopping the
+    thread takes effect at once instead of at the end of the interval: saving
+    the configuration replaces this thread, and one that only noticed an hour
+    later would leave two rounds running against the same Letterboxd account.
+    """
+
+    def __init__(self, logger, sync_instance: LetterboxarrSync):
+        super().__init__(name='Letterboxarr sync', daemon=True)
+        self.logger = logger
+        self.sync_instance = sync_instance
+        self.interval_minutes = sync_instance.config.sync.interval_minutes
+        self.stop_event = Event()
+        self.first_round = True
+
+    def run(self):
+        self.logger.info(f"Starting continuous sync (interval: {self.interval_minutes} minutes)")
+
+        while not self.stop_event.is_set():
             try:
-                self.sync_once()
+                self.run_round()
             except Exception as e:
                 self.logger.error(f"Error during sync: {e}")
 
-            self.logger.info(f"Sleeping for {interval_minutes} minutes...")
-            time.sleep(interval_minutes * 60)
+            self.stop_event.wait(self.interval_minutes * 60)
 
-class LetterboxarrThread(Thread):
-    """Thread for running continuous sync"""
+        self.logger.info("Stopped continuous sync")
 
-    def __init__(self, sync_instance: LetterboxarrSync):
-        super().__init__()
-        self.sync_instance = sync_instance
-        self.daemon = True
-        self.stop_event = Event()
+    def run_round(self):
+        """Read every watch list from Letterboxd, then hand what they hold to Radarr
 
-    def run(self):
-        self.sync_instance.run_continuous(self.sync_instance.config.sync.interval_minutes)
+        The first round only re-reads the lists already older than the interval,
+        so restarting does not set the whole crawl going again; every round
+        after that re-reads them all, which is what the interval asks for.
+        """
+        max_age = self.interval_minutes * 60 if self.first_round else None
+        self.first_round = False
+        self.sync_instance.sync_once(refresh=True, max_age=max_age)
 
-    def stop(self):
+    def stop(self, timeout: float = 1):
+        """Ask the thread to stop and give it a moment to notice
+
+        A round already under way is not interrupted: it may be halfway through
+        adding a movie to Radarr. The thread is a daemon, so an unfinished one
+        never holds the process open.
+        """
         self.stop_event.set()
-        self.join(timeout=1)
+        self.join(timeout=timeout)

@@ -8,7 +8,7 @@ services:
       - "7373:7373"  # Web interface
     volumes:
       - ./config.yml:/app/config.yml  # Configuration file (read-only)
-      - ./data:/app/data              # SQLite database: added movies, watched films, crawl cache
+      - ./data:/app/data              # SQLite database: added movies, watched films, crawled lists
     environment:
       - SECRET_KEY=${SECRET_KEY:-your-secret-key-change-this-in-production}
       - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}

@@ -91,10 +91,15 @@ const ConfigPage: React.FC = () => {
                     </label>
                     <input
                       type="number"
-                      {...register('sync.interval_minutes', { required: true, min: 1 })}
+                      {...register('sync.interval_minutes', { required: true, min: 1, valueAsNumber: true })}
                       className="input-field"
                       placeholder="60"
                     />
+                    <p className="mt-2 text-sm text-dark-text-muted">
+                      How often your watch lists are read again from Letterboxd in the background,
+                      and the movies they hold handed to Radarr. Everything the interface shows
+                      comes from what was last read.
+                    </p>
                     {errors.sync?.interval_minutes && (
                       <p className="mt-2 text-sm text-brand-orange">Interval must be at least 1 minute</p>
                     )}

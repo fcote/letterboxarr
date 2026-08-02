@@ -71,6 +71,8 @@ export interface DashboardSummary {
   added_last_week: number;
   watched: number | null;
   recently_added: AddedMovie[];
+  // Oldest stored listing, so how current the least current watch item is
+  lists_refreshed_at: number | null;
   sync: {
     running: boolean;
     last: SyncRun | null;
@@ -110,6 +112,8 @@ export interface WatchItemMovies {
     tags: string[];
   };
   movies: Movie[];
+  // When this list was last read from Letterboxd, null if it never has been
+  last_refreshed: number | null;
   total_count: number;
   category_counts?: Record<MovieCategory, number>;
   watched_count?: number | null;

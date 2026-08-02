@@ -3,7 +3,7 @@
 
 ---
 sync:
-  interval_minutes: 60  # How often to check for new movies (in minutes)
+  interval_minutes: 60  # How often your lists are read again from Letterboxd and synced to Radarr
 
 radarr:
   url: http://radarr:7878      # Radarr instance URL

@@ -149,9 +149,15 @@ class LetterboxarrAPIContext:
         return {"username": username}
 
     def restart_sync_thread(self):
+        """Point the sync round at the configuration just loaded
+
+        It carries the interval from it, and the refresher it runs holds the
+        watch list it walks, so saving the configuration replaces the thread
+        rather than telling the running one about the change.
+        """
         if self.sync_thread:
             self.sync_thread.stop()
-        self.sync_thread = LetterboxarrThread(self.sync_instance)
+        self.sync_thread = LetterboxarrThread(logger, self.sync_instance)
         self.sync_thread.start()
 
     def load_config(self):
@@ -421,6 +427,7 @@ def get_movies_by_watch_item(item_id: int, current_user: dict = Depends(context.
                 "tags": watch_item.tags
             },
             "movies": movies,
+            "last_refreshed": context.sync_instance.db.get_path_fetched_at(watch_item.path),
             "total_count": len(movies),
             "category_counts": category_counts,
             "watched_count": None if watched_slugs is None else sum(1 for m in movies if m["watched"])
@@ -432,10 +439,12 @@ def get_movies_by_watch_item(item_id: int, current_user: dict = Depends(context.
 
 @context.app.post("/api/watch-items/{item_id}/refresh")
 def refresh_watch_item(item_id: int, current_user: dict = Depends(context.get_current_user)):
-    """Drop what is cached for a watch item so the next read re-crawls Letterboxd
+    """Re-read a watch item from Letterboxd now, ahead of its next scheduled refresh
 
-    Only the list is dropped. Watched films are shared by every watch item and
-    refresh on their own hourly, so a per-item button does not re-read them.
+    Answers once the whole list is stored, which on a large one is a matter of
+    minutes: the caller wants to see the new listing, and returning before it is
+    there would only have it read the old one. Watched films are shared by every
+    watch item and refresh on their own, so a per-item button leaves them alone.
     """
     if not context.current_config or item_id >= len(context.current_config.letterboxd.watch):
         raise HTTPException(status_code=404, detail="Watch item not found")
@@ -445,9 +454,9 @@ def refresh_watch_item(item_id: int, current_user: dict = Depends(context.get_cu
 
     try:
         watch_item = context.current_config.letterboxd.watch[item_id]
-        cleared = context.sync_instance.db.clear_crawls(watch_item.path)
-        logger.info(f"Refreshing {watch_item.path}, dropped {cleared} cached crawls")
-        return {"item_id": item_id, "path": watch_item.path, "cleared": cleared}
+        logger.info(f"Refreshing {watch_item.path} on request")
+        refreshed = context.sync_instance.refresher.refresh_watch_item(watch_item)
+        return {"item_id": item_id, "path": watch_item.path, "refreshed": refreshed}
 
     except Exception as e:
         logger.error(f"Error refreshing watch item: {e}")
@@ -504,7 +513,9 @@ async def run_sync(background_tasks: BackgroundTasks, current_user: dict = Depen
 
     def run_sync_task():
         try:
-            context.sync_instance.sync_once()
+            # A whole round, lists included: asking for a sync now is asking for
+            # what the lists hold now, not for what they held at the last read
+            context.sync_instance.sync_once(refresh=True)
         except Exception as e:
             logger.error(f"Error during sync: {e}")
 
@@ -543,6 +554,7 @@ async def get_dashboard(current_user: dict = Depends(context.get_current_user)):
         "added_last_week": db.count_added(since=datetime.now().timestamp() - 7 * 86400),
         "watched": db.count_watched(username) if username else None,
         "recently_added": db.get_recently_added(),
+        "lists_refreshed_at": db.last_list_refresh(),
         "sync": {
             "running": db.get_running_sync_run() is not None,
             "last": db.get_last_sync_run()

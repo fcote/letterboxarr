@@ -2,12 +2,18 @@
 
 Replaces the JSON files that used to live under ./data: one file per crawl for
 the scraper cache, and processed_movies.json for the movies added to Radarr.
-A single database holds the crawl cache, the films watched on the Letterboxd
+A single database holds the crawled lists, the films watched on the Letterboxd
 profile and the movies added to Radarr, all keyed by Letterboxd slug so they
 can be read together.
 
-Both the API threadpool and the sync thread use the same instance, so every
-statement runs under a lock on a single connection.
+Nothing here expires. What has been read from Letterboxd is the application's
+data, not a cache of it: reads always answer from the database, and the
+background refresher replaces a listing once it has a newer one in hand. That
+way a slow, refused or rate-limited crawl degrades into serving yesterday's
+list rather than serving nothing.
+
+Both the API threadpool and the background threads use the same instance, so
+every statement runs under a lock on a single connection.
 """
 import json
 import os
@@ -31,19 +37,23 @@ CREATE TABLE IF NOT EXISTS films (
     year  INTEGER
 );
 
--- One row per cached listing: a path crawled with a given set of filters
-CREATE TABLE IF NOT EXISTS crawls (
-    cache_key  TEXT PRIMARY KEY,
+-- One row per stored listing: a path read with a given set of filters.
+-- fetched_at is when it was last read from Letterboxd, which is what the
+-- refresher schedules on; it is not an expiry.
+CREATE TABLE IF NOT EXISTS lists (
+    list_key   TEXT PRIMARY KEY,
     path       TEXT NOT NULL,
     fetched_at REAL NOT NULL
 );
 
--- The films a cached listing contained, in the order Letterboxd returned them
-CREATE TABLE IF NOT EXISTS crawl_films (
-    cache_key TEXT    NOT NULL REFERENCES crawls(cache_key) ON DELETE CASCADE,
-    position  INTEGER NOT NULL,
-    slug      TEXT    NOT NULL REFERENCES films(slug),
-    PRIMARY KEY (cache_key, position)
+CREATE INDEX IF NOT EXISTS idx_lists_path ON lists(path);
+
+-- The films a listing contained, in the order Letterboxd returned them
+CREATE TABLE IF NOT EXISTS list_films (
+    list_key TEXT    NOT NULL REFERENCES lists(list_key) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    slug     TEXT    NOT NULL REFERENCES films(slug),
+    PRIMARY KEY (list_key, position)
 );
 
 -- refreshed_at covers incremental refreshes, which only ever add films;
@@ -94,15 +104,24 @@ ADDED_COLUMNS = [
      "UPDATE watched_profiles SET full_refreshed_at = refreshed_at"),
 ]
 
+# Tables and columns renamed when crawled listings stopped being a cache, applied
+# on open before the schema is created so the rows survive the change of name.
+RENAMED_TABLES = [
+    ('crawls', 'lists'),
+    ('crawl_films', 'list_films'),
+]
+RENAMED_COLUMNS = [
+    ('lists', 'cache_key', 'list_key'),
+    ('list_films', 'cache_key', 'list_key'),
+]
+
 
 class Database:
-    """Crawl cache, watched films and added movies, in one SQLite file"""
+    """Crawled lists, watched films and added movies, in one SQLite file"""
 
-    def __init__(self, logger, db_path: str = DB_PATH, cache_ttl: int = 3600,
-                 watched_full_ttl: int = 86400):
+    def __init__(self, logger, db_path: str = DB_PATH, watched_full_ttl: int = 86400):
         self.logger = logger
         self.db_path = db_path
-        self.cache_ttl = cache_ttl  # Seconds a crawl or watched profile stays fresh
         # Seconds before a watched profile has to be re-read in full rather than
         # topped up: only a whole re-read notices films that are no longer watched
         self.watched_full_ttl = watched_full_ttl
@@ -117,103 +136,135 @@ class Database:
         self.connection.execute("PRAGMA journal_mode=WAL")
         self.connection.execute("PRAGMA foreign_keys=ON")
         self.connection.execute("PRAGMA busy_timeout=5000")
+
+        self._rename_legacy_tables()
         with self.connection:
             self.connection.executescript(SCHEMA)
 
         self._add_missing_columns()
         self._migrate_legacy_storage()
         self._close_interrupted_sync_runs()
-        self.purge_expired_crawls()
 
     def close(self) -> None:
         with self.lock:
             self.connection.close()
 
-    # -- Crawl cache ------------------------------------------------------
+    # -- Stored lists -----------------------------------------------------
 
-    def get_cached_crawl(self, cache_key: str) -> Optional[List[Dict]]:
-        """Films of a cached crawl, or None when absent or older than the TTL"""
+    def get_list(self, list_key: str) -> Optional[List[Dict]]:
+        """Films of a stored listing, or None if it has never been read
+
+        Whatever its age: a listing is only ever replaced by a newer read of the
+        same listing, never dropped for being old.
+        """
         with self.lock:
-            crawl = self.connection.execute(
-                "SELECT fetched_at FROM crawls WHERE cache_key = ?", (cache_key,)
+            stored = self.connection.execute(
+                "SELECT 1 FROM lists WHERE list_key = ?", (list_key,)
             ).fetchone()
 
-            if not crawl or time.time() - crawl['fetched_at'] >= self.cache_ttl:
+            if not stored:
                 return None
 
             rows = self.connection.execute(
                 """SELECT films.slug, films.title, films.year
-                   FROM crawl_films
-                   JOIN films ON films.slug = crawl_films.slug
-                   WHERE crawl_films.cache_key = ?
-                   ORDER BY crawl_films.position""",
-                (cache_key,)
+                   FROM list_films
+                   JOIN films ON films.slug = list_films.slug
+                   WHERE list_films.list_key = ?
+                   ORDER BY list_films.position""",
+                (list_key,)
             ).fetchall()
 
         return [self._as_movie(row) for row in rows]
 
-    def save_crawl(self, cache_key: str, path: str, movies: Sequence[Dict]) -> None:
-        """Store the result of a crawl, replacing any previous one"""
+    def get_list_fetched_at(self, list_key: str) -> Optional[float]:
+        """When a listing was last read from Letterboxd, None if it never was"""
+        with self.lock:
+            row = self.connection.execute(
+                "SELECT fetched_at FROM lists WHERE list_key = ?", (list_key,)
+            ).fetchone()
+
+        return row['fetched_at'] if row else None
+
+    def get_path_fetched_at(self, path: str) -> Optional[float]:
+        """When a watch item was last read, taken from its oldest filter variant
+
+        Resolving categories reads the same path under several filters, and the
+        movies page only shows the whole set once every one of them is in, so
+        the oldest is what "this list was last refreshed" means.
+        """
+        with self.lock:
+            row = self.connection.execute(
+                "SELECT MIN(fetched_at) AS oldest FROM lists WHERE path = ?", (path,)
+            ).fetchone()
+
+        return row['oldest'] if row else None
+
+    def save_list(self, list_key: str, path: str, movies: Sequence[Dict]) -> None:
+        """Store a listing just read from Letterboxd, replacing the previous one"""
         try:
             with self.lock, self.connection:
                 self._upsert_films(movies)
-                self.connection.execute("DELETE FROM crawls WHERE cache_key = ?", (cache_key,))
+                self.connection.execute("DELETE FROM lists WHERE list_key = ?", (list_key,))
                 self.connection.execute(
-                    "INSERT INTO crawls (cache_key, path, fetched_at) VALUES (?, ?, ?)",
-                    (cache_key, path, time.time())
+                    "INSERT INTO lists (list_key, path, fetched_at) VALUES (?, ?, ?)",
+                    (list_key, path, time.time())
                 )
                 self.connection.executemany(
-                    "INSERT INTO crawl_films (cache_key, position, slug) VALUES (?, ?, ?)",
-                    [(cache_key, position, movie['letterboxd_slug'])
+                    "INSERT INTO list_films (list_key, position, slug) VALUES (?, ?, ?)",
+                    [(list_key, position, movie['letterboxd_slug'])
                      for position, movie in enumerate(movies)]
                 )
         except sqlite3.Error as e:
-            self.logger.warning(f"Error caching crawl of {path}: {e}")
+            self.logger.warning(f"Error storing the listing of {path}: {e}")
 
-    def clear_crawls(self, path: str) -> int:
-        """Drop the cached crawls of a path, so the next read goes to Letterboxd
+    def last_list_refresh(self) -> Optional[float]:
+        """When the least recently read listing was read, None if there are none
 
-        Every filter variant of the path goes, not just the one a given watch
-        item uses: resolving categories crawls the same path several times, and
-        a refresh that left some of those behind would mix old and new listings.
+        The whole set is only as current as its oldest member, so that is what
+        the dashboard reports as the last refresh.
         """
-        try:
-            with self.lock, self.connection:
-                cursor = self.connection.execute("DELETE FROM crawls WHERE path = ?", (path,))
-            return cursor.rowcount
-        except sqlite3.Error as e:
-            self.logger.warning(f"Error clearing cached crawls of {path}: {e}")
+        with self.lock:
+            row = self.connection.execute("SELECT MIN(fetched_at) AS oldest FROM lists").fetchone()
+
+        return row['oldest'] if row else None
+
+    def prune_lists(self, paths: Sequence[str]) -> int:
+        """Drop the listings of paths no longer watched, returning how many went
+
+        Editing a watch item changes its path and leaves the old listings behind
+        with nothing to refresh them; deleting one leaves all of them behind.
+        Nothing is pruned when no path is watched at all: that is as much a
+        configuration that failed to load as it is an empty watch list.
+        """
+        if not paths:
             return 0
 
-    def purge_expired_crawls(self) -> int:
-        """Drop cached crawls past the TTL, returning how many were removed"""
         try:
+            placeholders = ','.join('?' * len(paths))
             with self.lock, self.connection:
                 cursor = self.connection.execute(
-                    "DELETE FROM crawls WHERE fetched_at < ?", (time.time() - self.cache_ttl,)
+                    f"DELETE FROM lists WHERE path NOT IN ({placeholders})", tuple(paths)
                 )
             return cursor.rowcount
         except sqlite3.Error as e:
-            self.logger.warning(f"Error purging expired crawls: {e}")
+            self.logger.warning(f"Error pruning listings that are no longer watched: {e}")
             return 0
 
     # -- Watched films ----------------------------------------------------
 
-    def get_watched_slugs(self, username: str, fresh_only: bool = True) -> Optional[Set[str]]:
-        """Slugs watched by a profile, or None when unknown
+    def get_watched_slugs(self, username: str) -> Optional[Set[str]]:
+        """Slugs watched by a profile, or None if it has never been read
 
-        With fresh_only, a profile last refreshed longer ago than the TTL counts
-        as unknown; without it the stored set is returned whatever its age, which
-        is what a failed refresh falls back on.
+        Whatever its age, like the stored listings: the refresher is what brings
+        it up to date, and a profile read yesterday is a far better answer than
+        no profile at all.
         """
         with self.lock:
             profile = self.connection.execute(
-                "SELECT refreshed_at FROM watched_profiles WHERE username = ?", (username,)
+                "SELECT 1 FROM watched_profiles WHERE username = ?", (username,)
             ).fetchone()
 
             if not profile:
-                return None
-            if fresh_only and time.time() - profile['refreshed_at'] >= self.cache_ttl:
                 return None
 
             rows = self.connection.execute(
@@ -221,6 +272,15 @@ class Database:
             ).fetchall()
 
         return {row['slug'] for row in rows}
+
+    def get_watched_refreshed_at(self, username: str) -> Optional[float]:
+        """When the profile was last checked for new films, None if never"""
+        with self.lock:
+            row = self.connection.execute(
+                "SELECT refreshed_at FROM watched_profiles WHERE username = ?", (username,)
+            ).fetchone()
+
+        return row['refreshed_at'] if row else None
 
     def needs_full_watched_refresh(self, username: str) -> bool:
         """Whether topping the profile up is no longer enough and it must be re-read
@@ -462,6 +522,67 @@ class Database:
             'letterboxd_slug': row['slug']
         }
 
+    def _rename_legacy_tables(self) -> None:
+        """Apply the renames of tables and columns that kept their contents
+
+        Runs before the schema is created: CREATE TABLE IF NOT EXISTS would
+        otherwise make an empty table under the new name and leave the rows
+        stranded under the old one.
+        """
+        existing = {
+            row['name']
+            for row in self.connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        }
+
+        for old, new in RENAMED_TABLES:
+            if old not in existing or new in existing:
+                continue
+            try:
+                with self.lock, self.connection:
+                    self.connection.execute(f"ALTER TABLE {old} RENAME TO {new}")
+            except sqlite3.Error as e:
+                self.logger.error(f"Error renaming {old} to {new} in {self.db_path}: {e}")
+                continue
+            self.logger.info(f"Renamed {old} to {new} in {self.db_path}")
+
+        for table, old, new in RENAMED_COLUMNS:
+            columns = {
+                row['name'] for row in self.connection.execute(f"PRAGMA table_info({table})")
+            }
+            if old not in columns or new in columns:
+                continue
+            try:
+                with self.lock, self.connection:
+                    self.connection.execute(f"ALTER TABLE {table} RENAME COLUMN {old} TO {new}")
+            except sqlite3.Error as e:
+                self.logger.error(f"Error renaming {table}.{old} to {new} in {self.db_path}: {e}")
+                continue
+            self.logger.info(f"Renamed {table}.{old} to {table}.{new} in {self.db_path}")
+
+        if any(old in existing for old, _ in RENAMED_TABLES):
+            self._drop_listings_of_the_previous_scheme()
+
+    def _drop_listings_of_the_previous_scheme(self) -> None:
+        """Empty the listings carried over from the cache the database used to be
+
+        Their keys were derived from a crawl limit that no longer exists, so
+        nothing reads them and nothing refreshes them: they would sit there for
+        good, and dragging the last-refresh dates back with them. The first
+        refresh after the upgrade reads them all again.
+        """
+        try:
+            with self.lock, self.connection:
+                cursor = self.connection.execute("DELETE FROM lists")
+        except sqlite3.Error as e:
+            self.logger.error(f"Error dropping the listings of the previous scheme: {e}")
+            return
+
+        if cursor.rowcount:
+            self.logger.info(
+                f"Dropped {cursor.rowcount} listing(s) stored under the previous scheme, "
+                f"they will be read again on the next refresh"
+            )
+
     def _add_missing_columns(self) -> None:
         """Add columns introduced after a database on disk may have been created"""
         for table, column, column_type, backfill in ADDED_COLUMNS:
@@ -489,8 +610,8 @@ class Database:
         """Import processed_movies.json and drop the crawl cache files
 
         Runs once: the JSON file is renamed afterwards so a restart does not
-        resurrect entries deleted from the database. Cached crawls are not worth
-        importing, they expire within the hour.
+        resurrect entries deleted from the database. The crawl files are not
+        worth importing, the first refresh replaces them anyway.
         """
         self._import_legacy_processed_movies()
         self._remove_legacy_cache_files()

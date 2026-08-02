@@ -253,8 +253,8 @@ const WatchItemsPage: React.FC = () => {
 
     setRefreshing(item.id);
     try {
+      // Answers once the list is stored, so the progress reloads off the new one
       await watchItemsAPI.refresh(item.id);
-      // Reading it back is what re-crawls it, so the progress bar reloads too
       await loadItemProgress(item.id, progressRun.current);
       toast.success(`letterboxd.com/${item.path} re-read from Letterboxd`);
     } catch (error: any) {
@@ -715,7 +715,7 @@ const WatchItemsPage: React.FC = () => {
                           onClick={() => handleRefresh(item)}
                           disabled={refreshing === item.id}
                           className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-dark-text-muted hover:bg-dark-bg-tertiary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-blue disabled:opacity-50 disabled:cursor-not-allowed"
-                          title="Discard what is cached for this list and read it from Letterboxd again"
+                          title="Read this list from Letterboxd again, ahead of its next scheduled refresh"
                           aria-label={`Refresh letterboxd.com/${item.path}`}
                         >
                           <ArrowPathIcon className={`h-4 w-4 ${refreshing === item.id ? 'animate-spin' : ''}`} />

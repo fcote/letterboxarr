@@ -11,6 +11,8 @@ from typing import List, Optional
 @dataclass
 class SyncConfig:
     """Sync configuration"""
+    # Drives both halves of a round: reading the watch lists from Letterboxd,
+    # and handing what they hold to Radarr
     interval_minutes: int = 60
 
     def to_dict(self) -> dict:

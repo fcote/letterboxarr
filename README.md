@@ -15,7 +15,8 @@ Automatically sync your Letterboxd lists to your Radarr instance. This script pe
 - 🎬 Scrapes multiple Letterboxd lists (watchlists, collections, actors, directors, etc.)
 - 🏷️ Automatic tag assignment to movies based on their source list
 - 🔄 Automatic periodic synchronization
-- 📝 Tracks added movies, watched films and crawled lists in a SQLite database
+- 📝 Keeps added movies, watched films and the lists themselves in a SQLite database
+- 🌙 Reads your lists from Letterboxd in the background, so the interface never waits on a crawl
 - 🐳 Docker support for easy deployment
 - 🔍 Smart movie matching using title and year, falling back to TMDB ID
 - ⚡ Configurable sync interval and filters
@@ -23,7 +24,7 @@ Automatically sync your Letterboxd lists to your Radarr instance. This script pe
 - 🗂️ Movies view split into films, short films, documentaries and TV shows
 - 👁️ Flags the films you have already watched on your Letterboxd profile
 - 📊 Per-category watched progress on each watch item
-- 🔄 Per-list refresh button to re-read a list from Letterboxd without waiting for the cache to expire
+- 🔄 Per-list refresh button to re-read a list from Letterboxd ahead of its next scheduled refresh
 - ⚙️ YAML configuration file support
 - 🌐 Web interface for configuration and monitoring
 
@@ -82,7 +83,7 @@ services:
       - "7373:7373"  # Web interface
     volumes:
       - ./config.yml:/app/config.yml  # Configuration file
-      - ./data:/app/data              # SQLite database: added movies, watched films, crawl cache
+      - ./data:/app/data              # SQLite database: added movies, watched films, crawled lists
     environment:
       - SECRET_KEY=${SECRET_KEY:-your-secret-key-change-this-in-production}
       - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
@@ -154,10 +155,12 @@ The web interface is protected by authentication. Default credentials:
 Everything is kept in a single SQLite database, `letterboxarr.db`, in the `/app/data` directory in the container (mapped to `./data` on the host):
 
 - **Added movies** — the movies already handed to Radarr, so they are not added twice and failed lookups are not retried on every sync.
-- **Watched films** — the films marked as watched on the configured Letterboxd profile. Refreshed hourly, but only topped up: `/films/by/date/` lists films newest-logged first, so the refresh reads pages until one holds nothing new and stops, which is a single page when nothing has been watched since the last check. Adding films is all a top-up can do, so the profile is also re-read in full once a day to pick up anything no longer watched. If a refresh fails, the last known set is reused rather than reporting everything as unwatched.
-- **Crawled listings** — each list, with the filters it was crawled with, cached for an hour. Resolving categories crawls a list several times, so this is what keeps the movies page usable.
+- **Watched films** — the films marked as watched on the configured Letterboxd profile. Refreshed on the sync interval, but only topped up: `/films/by/date/` lists films newest-logged first, so the refresh reads pages until one holds nothing new and stops, which is a single page when nothing has been watched since the last check. Adding films is all a top-up can do, so the profile is also re-read in full once a day to pick up anything no longer watched.
+- **Crawled listings** — each list, with the filters it was read with. Resolving categories reads a list several times, so a single watch item is five listings.
 
-The previous storage is imported on first start: the entries in `processed_movies.json` are copied into the database and the file is renamed to `processed_movies.json.migrated`, and the `data/cache` directory of per-crawl JSON files is removed. Nothing needs to be done by hand; downgrading is still possible by renaming the file back.
+Nothing in the database expires. Reads always answer from it, however old it is, and a listing is only ever replaced once a newer read of the same listing has come back in full — so a refused page, a rate limit or a Letterboxd outage costs you a refresh, not your lists. Keeping it current is the background round's job: every `interval_minutes` it reads the watch lists from Letterboxd and then hands what they hold to Radarr, in that order, so a film added to a list reaches Radarr in the same round. The per-list refresh button does the reading half on demand for a single list.
+
+The previous storage is imported on first start: the entries in `processed_movies.json` are copied into the database and the file is renamed to `processed_movies.json.migrated`, and the `data/cache` directory of per-crawl JSON files is removed. Nothing needs to be done by hand; downgrading is still possible by renaming the file back. Databases written before the listings stopped being a cache keep their added movies and watched films, and read their lists again on the first refresh.
 
 ## Contributing
 

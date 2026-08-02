@@ -307,6 +307,14 @@ const DashboardPage: React.FC = () => {
                   </dd>
                 </div>
                 <div className="py-4 sm:py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
+                  <dt className="text-sm font-medium text-dark-text-muted">Lists</dt>
+                  <dd className="mt-1 text-sm text-dark-text-primary sm:mt-0 sm:col-span-2">
+                    {summary?.lists_refreshed_at != null
+                      ? `Last read from Letterboxd ${relativeTime(summary.lists_refreshed_at)}`
+                      : 'Not read from Letterboxd yet'}
+                  </dd>
+                </div>
+                <div className="py-4 sm:py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
                   <dt className="text-sm font-medium text-dark-text-muted">Global Filters</dt>
                   <dd className="mt-1 text-sm text-dark-text-primary sm:mt-0 sm:col-span-2">
                     <div className="flex flex-wrap gap-2">

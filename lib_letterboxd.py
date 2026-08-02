@@ -50,13 +50,11 @@ class LetterboxdScraper:
         self.crawl_lock = RLock()
 
     @staticmethod
-    def _get_cache_key(watch_item: WatchListItem, global_filters: LetterboxdFilters,
-                       limit: Optional[int] = None) -> str:
-        """Generate a cache key based on watch item path, filters, and limit"""
+    def _list_key(watch_item: WatchListItem, global_filters: LetterboxdFilters) -> str:
+        """The key a listing is stored under: its path and the filters it was read with"""
         key_data = {
             'path': watch_item.path,
-            'global_filters': global_filters.to_dict(),
-            'limit': limit
+            'global_filters': global_filters.to_dict()
         }
         if watch_item.filters:
             key_data['filters'] = watch_item.filters.to_dict()
@@ -135,42 +133,78 @@ class LetterboxdScraper:
         if cookie_filters:
             self.session.cookies.set('filmFilter', cookie_filters, domain='letterboxd.com')
 
-    def get_movies_from_path(self, watch_item: WatchListItem, global_filters: LetterboxdFilters,
-                             limit: Optional[int] = None) -> List[Dict]:
-        """Get movies from a specific Letterboxd path"""
+    def get_movies_from_path(self, watch_item: WatchListItem,
+                             global_filters: LetterboxdFilters) -> List[Dict]:
+        """The stored listing of a Letterboxd path, reading it if there is none
+
+        Never re-reads a listing it already has, however old: keeping it current
+        is the refresher's job, so browsing the movies page answers from the
+        database instead of waiting minutes on a crawl.
+        """
+        list_key = self._list_key(watch_item, global_filters)
+
+        stored = self.db.get_list(list_key)
+        if stored is not None:
+            self.logger.debug(f"Read {len(stored)} stored movies for {watch_item.path}")
+            return stored
+
         with self.crawl_lock:
-            return self._crawl_path(watch_item, global_filters, limit)
+            # Whoever held the lock may have been reading this very listing
+            stored = self.db.get_list(list_key)
+            if stored is not None:
+                return stored
 
-    def _crawl_path(self, watch_item: WatchListItem, global_filters: LetterboxdFilters,
-                    limit: Optional[int] = None) -> List[Dict]:
-        # Check cache first
-        cache_key = self._get_cache_key(watch_item, global_filters, limit)
+            self.logger.info(f"No stored listing for {watch_item.path}, reading it now")
+            return self._read_list(list_key, watch_item, global_filters)
 
-        cached_movies = self.db.get_cached_crawl(cache_key)
-        if cached_movies is not None:
-            self.logger.debug(f"Loading {len(cached_movies)} movies from cache for {watch_item.path}")
-            return cached_movies
+    def refresh_path(self, watch_item: WatchListItem, global_filters: LetterboxdFilters,
+                     max_age: Optional[float] = None) -> bool:
+        """Re-read a listing from Letterboxd and store it over the previous one
 
-        # Cache miss or expired, fetch from web
-        self.logger.debug(f"Cache miss for {watch_item.path}, fetching from web")
-        movies = self._fetch_path(watch_item, global_filters, limit)
+        A listing read more recently than max_age is left alone, which is what
+        stops a restart from crawling everything again. Returns whether the
+        stored listing was replaced, so a crawl that came back empty and left
+        the previous one in place does not count as a refresh.
+        """
+        list_key = self._list_key(watch_item, global_filters)
 
-        # An empty result is more often a refused page than an empty list, and
-        # caching it would keep the list empty for the whole TTL
-        if len(movies) > 0:
-            self.db.save_crawl(cache_key, watch_item.path, movies)
+        with self.crawl_lock:
+            fetched_at = self.db.get_list_fetched_at(list_key)
+            if max_age is not None and fetched_at is not None \
+                    and time.time() - fetched_at < max_age:
+                return False
 
+            self._read_list(list_key, watch_item, global_filters)
+            return self.db.get_list_fetched_at(list_key) != fetched_at
+
+    def _read_list(self, list_key: str, watch_item: WatchListItem,
+                   global_filters: LetterboxdFilters) -> List[Dict]:
+        """Crawl a listing and store it, keeping what is stored if it comes back empty
+
+        Must be called under the crawl lock. An empty result is far more often a
+        refused page than an emptied list, and storing it would replace a good
+        listing with nothing until the next refresh.
+        """
+        movies = self._fetch_path(watch_item, global_filters)
+
+        if not movies:
+            stored = self.db.get_list(list_key)
+            if stored is not None:
+                self.logger.warning(
+                    f"Letterboxd returned no movies for {watch_item.path}, keeping the stored listing"
+                )
+                return stored
+            return []
+
+        self.db.save_list(list_key, watch_item.path, movies)
         return movies
 
-    def _fetch_path(self, watch_item: WatchListItem, global_filters: LetterboxdFilters,
-                    limit: Optional[int] = None) -> List[Dict]:
-        """Crawl every page of a Letterboxd path, without touching the cache"""
+    def _fetch_path(self, watch_item: WatchListItem,
+                    global_filters: LetterboxdFilters) -> List[Dict]:
+        """Crawl every page of a Letterboxd path, without touching the database"""
         movies = []
         for page_movies in self._iter_pages(watch_item, global_filters):
             movies.extend(page_movies)
-            if limit and len(movies) >= limit:
-                movies = movies[:limit]
-                break
 
         self.logger.info(f"Found {len(movies)} movies in {watch_item.path}")
         return movies
@@ -224,8 +258,8 @@ class LetterboxdScraper:
             page += 1
             time.sleep(1)  # Be respectful to the server
 
-    def get_movies_from_path_by_category(self, watch_item: WatchListItem, global_filters: LetterboxdFilters,
-                                         limit: Optional[int] = None) -> List[Dict]:
+    def get_movies_from_path_by_category(self, watch_item: WatchListItem,
+                                         global_filters: LetterboxdFilters) -> List[Dict]:
         """Get movies from a Letterboxd path, each tagged with a 'category'
 
         Letterboxd does not expose the category in the listing markup, but it can
@@ -234,18 +268,13 @@ class LetterboxdScraper:
         category hidden. Categories already excluded by the watch item filters
         cannot appear in the listing, so they cost no extra request.
         """
-        movies = self.get_movies_from_path(watch_item, global_filters, limit)
-        effective_filters = watch_item.filters or global_filters
+        movies = self.get_movies_from_path(watch_item, global_filters)
 
         categories = {}
-        for category, skip_attr in CATEGORY_SKIP_FILTERS:
-            if getattr(effective_filters, skip_attr, False):
-                continue
-
-            hidden_item = self._with_hidden_category(watch_item, effective_filters, skip_attr)
+        for category, hidden_item in self._category_variants(watch_item, global_filters):
             kept_slugs = {
                 movie['letterboxd_slug']
-                for movie in self.get_movies_from_path(hidden_item, global_filters, limit)
+                for movie in self.get_movies_from_path(hidden_item, global_filters)
             }
             for movie in movies:
                 slug = movie['letterboxd_slug']
@@ -257,29 +286,78 @@ class LetterboxdScraper:
             for movie in movies
         ]
 
+    def refresh_watch_item(self, watch_item: WatchListItem, global_filters: LetterboxdFilters,
+                           max_age: Optional[float] = None) -> int:
+        """Re-read every listing a watch item is shown from, returning how many were read
+
+        That is the listing itself plus the one-category-hidden variants the
+        movies page needs to tell a short film from a documentary, so a refreshed
+        watch item is entirely refreshed rather than half old.
+        """
+        variants = [watch_item] + [
+            variant for _, variant in self._category_variants(watch_item, global_filters)
+        ]
+        return sum(
+            self.refresh_path(variant, global_filters, max_age) for variant in variants
+        )
+
+    def _category_variants(self, watch_item: WatchListItem, global_filters: LetterboxdFilters):
+        """The (category, watch item with that category hidden) pairs worth reading
+
+        A category the watch item already filters out cannot appear in its
+        listing, so hiding it would read the very same listing again.
+        """
+        effective_filters = watch_item.filters or global_filters
+
+        for category, skip_attr in CATEGORY_SKIP_FILTERS:
+            if getattr(effective_filters, skip_attr, False):
+                continue
+            yield category, self._with_hidden_category(watch_item, effective_filters, skip_attr)
+
     def get_watched_slugs(self, username: str) -> Set[str]:
-        """Get the slugs of every film the Letterboxd user has marked as watched
+        """The slugs of every film the Letterboxd user has marked as watched
 
         Read from the member's public /films/ page, so no filters apply: the
         point is to know the whole watched history, not a filtered view of it.
-        The watched films are stored in their own table rather than the crawl
-        cache, so a refresh that fails can fall back on the last known set
-        instead of reporting nothing as watched.
 
-        Once a profile is known it is topped up rather than re-read, which for a
-        member with thousands of films is one page instead of dozens. Only a
-        whole re-read notices a film that is no longer watched, so one is still
-        done daily.
+        Answers from the database once the profile is known, whatever its age;
+        keeping it current is refresh_watched's job. Only a profile that has
+        never been read is read here, since reporting a member with thousands of
+        films as having watched nothing would have every list look unwatched.
         """
         stored = self.db.get_watched_slugs(username)
         if stored is not None:
             self.logger.debug(f"{username} has watched {len(stored)} films (stored)")
             return stored
 
-        known = self.db.get_watched_slugs(username, fresh_only=False)
+        with self.crawl_lock:
+            stored = self.db.get_watched_slugs(username)
+            if stored is not None:
+                return stored
+
+            self.logger.info(f"{username} has never been read, reading the profile now")
+            return self._read_watched(username, None)
+
+    def refresh_watched(self, username: str, max_age: Optional[float] = None) -> bool:
+        """Bring the watched profile up to date, returning whether it was read
+
+        Once a profile is known it is topped up rather than re-read, which for a
+        member with thousands of films is one page instead of dozens. Only a
+        whole re-read notices a film that is no longer watched, so one is still
+        done daily.
+        """
+        known = self.db.get_watched_slugs(username)
+
+        if known is not None and max_age is not None:
+            refreshed_at = self.db.get_watched_refreshed_at(username)
+            if refreshed_at is not None and time.time() - refreshed_at < max_age:
+                return False
+
         if known is None or self.db.needs_full_watched_refresh(username):
-            return self._read_watched(username, known)
-        return self._top_up_watched(username, known)
+            self._read_watched(username, known)
+        else:
+            self._top_up_watched(username, known)
+        return True
 
     def _read_watched(self, username: str, known: Optional[Set[str]]) -> Set[str]:
         """Read a member's whole watched history, replacing what is stored"""
@@ -293,7 +371,7 @@ class LetterboxdScraper:
             self.logger.warning(f"Could not refresh watched films for {username}, reusing the stored set: {e}")
             return known
 
-        # Same reasoning as the crawl cache: an empty profile page is far more
+        # Same reasoning as a stored listing: an empty profile page is far more
         # likely a refused request than a member who has watched nothing
         if not movies:
             if known is not None:

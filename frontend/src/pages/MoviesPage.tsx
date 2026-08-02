@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
 import { ProgressTrack } from '../components/CategoryProgressBars';
 import { MOVIE_CATEGORIES } from '../utils/categories';
+import { relativeTime } from '../utils/time';
 import {
   ArrowPathIcon,
   CheckCircleIcon,
@@ -46,8 +47,8 @@ const MoviesPage: React.FC = () => {
     const id = parseInt(itemId);
     setRefreshing(true);
     try {
+      // Answers once the list is stored, so what follows reads the new one
       await watchItemsAPI.refresh(id);
-      // Reading it back is what re-crawls it
       await loadMovies(id);
       toast.success('List re-read from Letterboxd');
     } catch (error: any) {
@@ -216,7 +217,8 @@ const MoviesPage: React.FC = () => {
               Movies from {movieData.watch_item.path}
             </h1>
             <p className="mt-2 max-w-4xl text-sm text-dark-text-muted">
-              Viewing {movieData.total_count} movies from this Letterboxd list.
+              Viewing {movieData.total_count} movies from this Letterboxd list
+              {movieData.last_refreshed != null && `, read ${relativeTime(movieData.last_refreshed)}`}.
             </p>
             {movieData.watch_item.tags && movieData.watch_item.tags.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-2">
@@ -235,7 +237,7 @@ const MoviesPage: React.FC = () => {
             onClick={handleRefresh}
             disabled={refreshing}
             className="btn-secondary flex items-center text-sm flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Discard what is cached for this list and read it from Letterboxd again"
+            title="Read this list from Letterboxd again, ahead of its next scheduled refresh"
           >
             <ArrowPathIcon className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
             {refreshing ? 'Refreshing...' : 'Refresh'}
