@@ -15,7 +15,14 @@ from passlib.context import CryptContext
 from pydantic import BaseModel
 
 from lib_config import ConfigLoader, Config, WatchListItem, LetterboxdFilters
-from lib_letterboxd import LetterboxdScraper
+from lib_letterboxd import (
+    LetterboxdScraper,
+    CATEGORY_FILM,
+    CATEGORY_SHORT_FILM,
+    CATEGORY_DOCUMENTARY,
+    CATEGORY_TV_SHOW,
+    CATEGORY_UNRELEASED,
+)
 from lib_sync import LetterboxarrSync, LetterboxarrThread
 
 # Configure logging
@@ -24,6 +31,15 @@ logger = logging.getLogger(__name__)
 
 # Paths
 CONFIG_PATH = "config.yml"
+
+# Categories reported for each movie, in display order
+MOVIE_CATEGORIES = [
+    CATEGORY_FILM,
+    CATEGORY_SHORT_FILM,
+    CATEGORY_DOCUMENTARY,
+    CATEGORY_TV_SHOW,
+    CATEGORY_UNRELEASED
+]
 
 # Security
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-this-in-production")
@@ -289,7 +305,7 @@ async def delete_watch_item(item_id: int, current_user: dict = Depends(context.g
         raise HTTPException(status_code=500, detail=f"Failed to delete watch item: {str(e)}")
 
 @context.app.post("/api/test-watch-item")
-async def test_letterboxd_url(request: WatchItemCreate, current_user: dict = Depends(context.get_current_user)):
+def test_letterboxd_url(request: WatchItemCreate, current_user: dict = Depends(context.get_current_user)):
     try:
         # Test URL by attempting to scrape first few movies
         item = WatchListItem(
@@ -323,45 +339,113 @@ async def get_processed_movies(current_user: dict = Depends(context.get_current_
         logger.error(f"Error getting processed movies: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get processed movies: {str(e)}")
 
+def get_categorised_movies(item_id: int) -> List[Dict]:
+    """Movies of a watch item, each with its category and Radarr status"""
+    watch_item = context.current_config.letterboxd.watch[item_id]
+    movies = context.sync_instance.letterboxd.get_movies_from_path_by_category(
+        watch_item=watch_item,
+        global_filters=context.current_config.letterboxd.filters
+    )
+
+    processed_movies = context.sync_instance.processed_movies if context.sync_instance else set()
+
+    return [
+        {
+            "title": movie["title"],
+            "year": movie["year"],
+            "letterboxd_url": f"https://letterboxd.com/film/{movie['letterboxd_slug']}/",
+            "letterboxd_slug": movie["letterboxd_slug"],
+            "processed": f"{movie['title']}_{movie['year']}" in processed_movies,
+            "tmdb_id": movie.get("tmdb_id"),
+            "category": movie.get("category", CATEGORY_FILM)
+        }
+        for movie in movies
+    ]
+
+
+def get_watched_slugs() -> Optional[set]:
+    """Slugs already watched on the configured Letterboxd profile, None if unset"""
+    username = context.current_config.letterboxd.username
+    if not username:
+        return None
+
+    try:
+        return context.sync_instance.letterboxd.get_watched_slugs(username)
+    except Exception as e:
+        logger.error(f"Error getting watched films for {username}: {e}")
+        return None
+
+
+# Endpoints below crawl Letterboxd, which takes minutes on a large list. They are
+# declared sync so FastAPI runs them off the event loop and the UI stays usable.
 @context.app.get("/api/movies/by-watch-item/{item_id}")
-async def get_movies_by_watch_item(item_id: int, current_user: dict = Depends(context.get_current_user)):
+def get_movies_by_watch_item(item_id: int, current_user: dict = Depends(context.get_current_user)):
     if not context.current_config or item_id >= len(context.current_config.letterboxd.watch):
         raise HTTPException(status_code=404, detail="Watch item not found")
 
     try:
         watch_item = context.current_config.letterboxd.watch[item_id]
-        movies = context.sync_instance.letterboxd.get_movies_from_path(
-            watch_item=watch_item,
-            global_filters=context.current_config.letterboxd.filters
-        )
+        movies = get_categorised_movies(item_id)
+        watched_slugs = get_watched_slugs()
 
-        # Check which movies have been processed
-        processed_movies = context.sync_instance.processed_movies if context.sync_instance else set()
-
-        movies_with_status = []
+        category_counts = {category: 0 for category in MOVIE_CATEGORIES}
         for movie in movies:
-            movie_key = f"{movie['title']}_{movie['year']}"
-            movies_with_status.append({
-                "title": movie["title"],
-                "year": movie["year"],
-                "letterboxd_url": f"https://letterboxd.com/film/{movie['letterboxd_slug']}/",
-                "letterboxd_slug": movie["letterboxd_slug"],
-                "processed": movie_key in processed_movies,
-                "tmdb_id": movie.get("tmdb_id")
-            })
+            category_counts[movie["category"]] = category_counts.get(movie["category"], 0) + 1
+            movie["watched"] = None if watched_slugs is None else movie["letterboxd_slug"] in watched_slugs
 
         return {
             "watch_item": {
                 "path": watch_item.path,
                 "tags": watch_item.tags
             },
-            "movies": movies_with_status,
-            "total_count": len(movies_with_status)
+            "movies": movies,
+            "total_count": len(movies),
+            "category_counts": category_counts,
+            "watched_count": None if watched_slugs is None else sum(1 for m in movies if m["watched"])
         }
 
     except Exception as e:
         logger.error(f"Error getting movies for watch item: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get movies: {str(e)}")
+
+@context.app.get("/api/watch-items/{item_id}/progress")
+def get_watch_item_progress(item_id: int, current_user: dict = Depends(context.get_current_user)):
+    """Per-category count of movies already watched for a watch item
+
+    Counts are None when no Letterboxd profile is configured, since watched
+    status is what the profile provides.
+    """
+    if not context.current_config or item_id >= len(context.current_config.letterboxd.watch):
+        raise HTTPException(status_code=404, detail="Watch item not found")
+
+    try:
+        movies = get_categorised_movies(item_id)
+        watched_slugs = get_watched_slugs()
+
+        def watched_in(selection: List[Dict]) -> Optional[int]:
+            if watched_slugs is None:
+                return None
+            return sum(1 for movie in selection if movie["letterboxd_slug"] in watched_slugs)
+
+        categories = []
+        for category in MOVIE_CATEGORIES:
+            in_category = [movie for movie in movies if movie["category"] == category]
+            categories.append({
+                "category": category,
+                "total": len(in_category),
+                "watched": watched_in(in_category)
+            })
+
+        return {
+            "item_id": item_id,
+            "total": len(movies),
+            "watched": watched_in(movies),
+            "categories": categories
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting progress for watch item: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get progress: {str(e)}")
 
 @context.app.post("/api/sync/run")
 async def run_sync(background_tasks: BackgroundTasks, current_user: dict = Depends(context.get_current_user)):
@@ -378,7 +462,7 @@ async def run_sync(background_tasks: BackgroundTasks, current_user: dict = Depen
     return {"message": "Sync started in background"}
 
 @context.app.post("/api/movies/add")
-async def add_movie_to_radarr(request: MovieAddRequest, current_user: dict = Depends(context.get_current_user)):
+def add_movie_to_radarr(request: MovieAddRequest, current_user: dict = Depends(context.get_current_user)):
     if not context.sync_instance:
         raise HTTPException(status_code=404, detail="Sync instance not available")
 

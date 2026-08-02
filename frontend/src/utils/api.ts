@@ -1,5 +1,5 @@
 import axios, { AxiosResponse } from 'axios';
-import { Config, LoginCredentials, Token, WatchItem, WatchItemMovies, LetterboxdTestResult } from '../types';
+import { Config, LoginCredentials, Token, WatchItem, WatchItemMovies, WatchItemProgress, LetterboxdTestResult } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -59,6 +59,10 @@ export const watchItemsAPI = {
   },
   delete: async (id: number): Promise<{ message: string }> => {
     const response = await api.delete(`/watch-items/${id}`);
+    return response.data;
+  },
+  getProgress: async (id: number): Promise<WatchItemProgress> => {
+    const response: AxiosResponse<WatchItemProgress> = await api.get(`/watch-items/${id}/progress`);
     return response.data;
   },
 };

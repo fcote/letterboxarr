@@ -4,9 +4,12 @@ import { moviesAPI } from '../utils/api';
 import { WatchItemMovies, Movie } from '../types';
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
-import { 
-  CheckCircleIcon, 
+import { MOVIE_CATEGORIES } from '../utils/categories';
+import {
+  CheckCircleIcon,
   ExclamationCircleIcon,
+  EyeIcon,
+  EyeSlashIcon,
   FilmIcon,
   PlusIcon
 } from '@heroicons/react/24/outline';
@@ -87,6 +90,92 @@ const MoviesPage: React.FC = () => {
 
   const processedCount = movieData.movies.filter(movie => movie.processed).length;
   const unprocessedCount = movieData.movies.length - processedCount;
+  const watchedCount = movieData.watched_count;
+
+  const sections = MOVIE_CATEGORIES
+    .map(section => ({
+      ...section,
+      movies: movieData.movies.filter(movie => (movie.category ?? 'film') === section.category)
+    }))
+    .filter(section => section.movies.length > 0);
+
+  const renderMovie = (movie: Movie, key: React.Key, Icon: React.ComponentType<React.ComponentProps<'svg'>>) => {
+    const movieKey = `${movie.title}_${movie.year}`;
+
+    return (
+      <li key={key} className="px-4 py-4 sm:px-6">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center">
+            <Icon className="h-5 w-5 text-dark-text-muted mr-3" />
+            <div>
+              <p className="text-sm font-medium text-dark-text-primary">
+                {movie.title}{movie.year ? ` (${movie.year})` : ''}
+              </p>
+              {movie.letterboxd_url && (
+                <p className="text-sm text-dark-text-muted">
+                  <a
+                    href={movie.letterboxd_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-brand-blue hover:text-brand-blue/80"
+                  >
+                    View on Letterboxd
+                  </a>
+                </p>
+              )}
+              {movie.tmdb_id && (
+                <p className="text-xs text-dark-text-muted">TMDB ID: {movie.tmdb_id}</p>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center space-x-3">
+            {movie.watched === true && (
+              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-brand-blue/20 text-brand-blue border border-brand-blue/30">
+                <EyeIcon className="h-3 w-3 mr-1" />
+                Watched
+              </span>
+            )}
+            {movie.watched === false && (
+              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-dark-bg-tertiary text-dark-text-muted border border-dark-border">
+                <EyeSlashIcon className="h-3 w-3 mr-1" />
+                Not watched
+              </span>
+            )}
+            {movie.processed ? (
+              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-brand-green/20 text-brand-green border border-brand-green/30">
+                <CheckCircleIcon className="h-3 w-3 mr-1" />
+                Added to Radarr
+              </span>
+            ) : (
+              <>
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-brand-orange/20 text-brand-orange border border-brand-orange/30">
+                  <ExclamationCircleIcon className="h-3 w-3 mr-1" />
+                  Pending
+                </span>
+                <button
+                  onClick={() => handleAddMovie(movie)}
+                  disabled={addingMovie === movieKey}
+                  className="btn-primary flex text-xs px-3 py-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {addingMovie === movieKey ? (
+                    <>
+                      <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
+                      Adding...
+                    </>
+                  ) : (
+                    <>
+                      <PlusIcon className="w-3 mr-1" />
+                      Add
+                    </>
+                  )}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </li>
+    );
+  };
 
   return (
     <Layout>
@@ -113,7 +202,7 @@ const MoviesPage: React.FC = () => {
         </div>
 
         {/* Statistics */}
-        <div className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-3">
+        <div className={`mt-6 grid grid-cols-1 gap-5 ${watchedCount == null ? 'sm:grid-cols-3' : 'sm:grid-cols-4'}`}>
           <div className="card overflow-hidden">
             <div className="p-5">
               <div className="flex items-center">
@@ -161,82 +250,50 @@ const MoviesPage: React.FC = () => {
               </div>
             </div>
           </div>
+
+          {watchedCount != null && (
+            <div className="card overflow-hidden">
+              <div className="p-5">
+                <div className="flex items-center">
+                  <div className="flex-shrink-0">
+                    <EyeIcon className="h-6 w-6 text-brand-blue" />
+                  </div>
+                  <div className="ml-5 w-0 flex-1">
+                    <dl>
+                      <dt className="text-sm font-medium text-dark-text-muted truncate">Already Watched</dt>
+                      <dd className="text-lg font-medium text-dark-text-primary">{watchedCount}</dd>
+                    </dl>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Movies List */}
-        <div className="mt-6">
-          <div className="card overflow-hidden">
-            <div className="px-4 py-5 sm:px-6">
-              <h3 className="text-lg leading-6 font-medium text-dark-text-primary">Movies</h3>
-              <p className="mt-1 max-w-2xl text-sm text-dark-text-muted">
-                List of all movies from this Letterboxd list and their sync status.
-              </p>
+        {/* Movies, split by category */}
+        {sections.map(section => (
+          <div key={section.category} className="mt-6">
+            <div className="card overflow-hidden">
+              <div className="px-4 py-5 sm:px-6">
+                <div className="flex items-center">
+                  <section.icon className="h-5 w-5 text-dark-text-muted mr-3" />
+                  <h3 className="text-lg leading-6 font-medium text-dark-text-primary">
+                    {section.title}
+                  </h3>
+                  <span className="ml-3 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-dark-border text-dark-text-muted">
+                    {section.movies.length}
+                  </span>
+                </div>
+                <p className="mt-1 max-w-2xl text-sm text-dark-text-muted">
+                  {section.description}
+                </p>
+              </div>
+              <ul className="divide-y divide-dark-border">
+                {section.movies.map((movie, index) => renderMovie(movie, movie.letterboxd_slug || index, section.icon))}
+              </ul>
             </div>
-            <ul className="divide-y divide-dark-border">
-              {movieData.movies.map((movie, index) => (
-                <li key={index} className="px-4 py-4 sm:px-6">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center">
-                      <FilmIcon className="h-5 w-5 text-dark-text-muted mr-3" />
-                      <div>
-                        <p className="text-sm font-medium text-dark-text-primary">
-                          {movie.title} ({movie.year})
-                        </p>
-                        {movie.letterboxd_url && (
-                          <p className="text-sm text-dark-text-muted">
-                            <a
-                              href={movie.letterboxd_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-brand-blue hover:text-brand-blue/80"
-                            >
-                              View on Letterboxd
-                            </a>
-                          </p>
-                        )}
-                        {movie.tmdb_id && (
-                          <p className="text-xs text-dark-text-muted">TMDB ID: {movie.tmdb_id}</p>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center space-x-3">
-                      {movie.processed ? (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-brand-green/20 text-brand-green border border-brand-green/30">
-                          <CheckCircleIcon className="h-3 w-3 mr-1" />
-                          Added to Radarr
-                        </span>
-                      ) : (
-                        <>
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-brand-orange/20 text-brand-orange border border-brand-orange/30">
-                            <ExclamationCircleIcon className="h-3 w-3 mr-1" />
-                            Pending
-                          </span>
-                          <button
-                            onClick={() => handleAddMovie(movie)}
-                            disabled={addingMovie === `${movie.title}_${movie.year}`}
-                            className="btn-primary flex text-xs px-3 py-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            {addingMovie === `${movie.title}_${movie.year}` ? (
-                              <>
-                                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
-                                Adding...
-                              </>
-                            ) : (
-                              <>
-                                <PlusIcon className="w-3 mr-1" />
-                                Add
-                              </>
-                            )}
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
           </div>
-        </div>
+        ))}
 
         {movieData.movies.length === 0 && (
           <div className="text-center py-12">
