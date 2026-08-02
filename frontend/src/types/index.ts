@@ -25,6 +25,7 @@ export interface Config {
     search_added: boolean;
   };
   letterboxd: {
+    username?: string;
     filters: {
       skip_documentaries: boolean;
       skip_short_films: boolean;
@@ -48,6 +49,8 @@ export interface WatchItem {
   } | null;
 }
 
+export type MovieCategory = 'film' | 'short_film' | 'documentary' | 'tv_show' | 'unreleased';
+
 export interface Movie {
   title: string;
   year: number;
@@ -55,6 +58,9 @@ export interface Movie {
   letterboxd_slug: string;
   processed: boolean;
   tmdb_id?: string;
+  category?: MovieCategory;
+  // null when no Letterboxd profile is configured, so watched status is unknown
+  watched?: boolean | null;
 }
 
 export interface WatchItemMovies {
@@ -64,6 +70,22 @@ export interface WatchItemMovies {
   };
   movies: Movie[];
   total_count: number;
+  category_counts?: Record<MovieCategory, number>;
+  watched_count?: number | null;
+}
+
+export interface CategoryProgress {
+  category: MovieCategory;
+  total: number;
+  // null when no Letterboxd profile is configured, so watched status is unknown
+  watched: number | null;
+}
+
+export interface WatchItemProgress {
+  item_id: number;
+  total: number;
+  watched: number | null;
+  categories: CategoryProgress[];
 }
 
 export interface LetterboxdTestResult {

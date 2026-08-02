@@ -14,6 +14,11 @@ radarr:
   search_added: true           # Whether to start searching for newly added movies
 
 letterboxd:
+  # Your Letterboxd username (optional). When set, the movies pages flag the
+  # films you have already watched, read from letterboxd.com/<username>/films.
+  # The profile must be public.
+  username: your-username
+
   filters:
     # Global filters applied to all lists (can be overridden per-list)
     skip_documentaries: false    # Skip documentary films

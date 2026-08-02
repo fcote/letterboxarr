@@ -93,13 +93,17 @@ class LetterboxdConfig:
     """Letterboxd configuration"""
     filters: LetterboxdFilters
     watch: List[WatchListItem]
+    username: Optional[str] = None  # Profile used to tell which films are already watched
 
     def to_dict(self) -> dict:
         """Serialize Letterboxd config to dictionary"""
-        return {
+        result = {
             "filters": self.filters.to_dict(),
             "watch": [item.to_dict() for item in self.watch]
         }
+        if self.username:
+            result["username"] = self.username
+        return result
 
 
 @dataclass
@@ -190,9 +194,10 @@ class ConfigLoader:
         
         letterboxd_config = LetterboxdConfig(
             filters=global_filters,
-            watch=watch_list
+            watch=watch_list,
+            username=letterboxd_data.get('username')
         )
-        
+
         return Config(
             sync=sync_config,
             radarr=radarr_config,
@@ -276,7 +281,8 @@ def load_config_from_env(logger):
 
     letterboxd_config = LetterboxdConfig(
         filters=letterboxd_filters,
-        watch=watch_items
+        watch=watch_items,
+        username=letterboxd_user
     )
 
     return Config(

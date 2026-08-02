@@ -1,19 +1,28 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { watchItemsAPI, letterboxdAPI } from '../utils/api';
-import { WatchItem, LetterboxdTestResult } from '../types';
+import { WatchItem, WatchItemProgress, LetterboxdTestResult } from '../types';
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
-import { 
-  PlusIcon, 
-  TrashIcon, 
-  CheckCircleIcon, 
+import { categoryDescriptor } from '../utils/categories';
+import {
+  PlusIcon,
+  TrashIcon,
+  CheckCircleIcon,
   ExclamationCircleIcon,
   FilmIcon,
+  MagnifyingGlassIcon,
   PencilIcon
 } from '@heroicons/react/24/outline';
 
+// Progress needs a Letterboxd crawl per list, so each one is loaded on its own
+type ProgressState = WatchItemProgress | 'loading' | 'error';
+
+
 const WatchItemsPage: React.FC = () => {
   const [watchItems, setWatchItems] = useState<WatchItem[]>([]);
+  const [search, setSearch] = useState('');
+  const [progress, setProgress] = useState<Record<number, ProgressState>>({});
+  const progressRun = useRef(0);
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
@@ -40,19 +49,117 @@ const WatchItemsPage: React.FC = () => {
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState<number | null>(null);
 
-  useEffect(() => {
-    loadWatchItems();
+  // One list at a time: the server crawls Letterboxd and serialises the crawls anyway
+  const loadProgress = useCallback(async (items: WatchItem[]) => {
+    progressRun.current += 1;
+    const run = progressRun.current;
+    setProgress({});
+
+    for (const item of items) {
+      if (item.id === undefined || run !== progressRun.current) return;
+
+      setProgress(previous => ({ ...previous, [item.id!]: 'loading' }));
+      try {
+        const itemProgress = await watchItemsAPI.getProgress(item.id);
+        if (run !== progressRun.current) return;
+        setProgress(previous => ({ ...previous, [item.id!]: itemProgress }));
+      } catch (error: any) {
+        if (run !== progressRun.current) return;
+        setProgress(previous => ({ ...previous, [item.id!]: 'error' }));
+      }
+    }
   }, []);
 
-  const loadWatchItems = async () => {
+  const loadWatchItems = useCallback(async () => {
     try {
       const items = await watchItemsAPI.getAll();
       setWatchItems(items);
+      loadProgress(items);
     } catch (error: any) {
       toast.error('Failed to load watch items');
     } finally {
       setLoading(false);
     }
+  }, [loadProgress]);
+
+  useEffect(() => {
+    loadWatchItems();
+  }, [loadWatchItems]);
+
+  const renderProgress = (item: WatchItem) => {
+    const state = item.id === undefined ? undefined : progress[item.id];
+
+    if (!state) {
+      return null;
+    }
+
+    if (state === 'loading') {
+      return (
+        <div className="mt-3 flex items-center text-xs text-dark-text-muted">
+          <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-dark-text-muted mr-2"></div>
+          Reading this list from Letterboxd...
+        </div>
+      );
+    }
+
+    if (state === 'error') {
+      return (
+        <p className="mt-3 text-xs text-brand-orange">Could not read this list from Letterboxd.</p>
+      );
+    }
+
+    if (state.total === 0) {
+      return <p className="mt-3 text-xs text-dark-text-muted">No movies found in this list.</p>;
+    }
+
+    if (state.watched === null) {
+      return (
+        <p className="mt-3 text-xs text-dark-text-muted">
+          Set your Letterboxd username in Configuration to see how much of this list you have watched.
+        </p>
+      );
+    }
+
+    // Unreleased entries cannot have been watched, so their bar would always read 0
+    const categories = state.categories.filter(
+      category => category.total > 0 && category.category !== 'unreleased'
+    );
+
+    if (categories.length === 0) {
+      return (
+        <p className="mt-3 text-xs text-dark-text-muted">Everything in this list is still unreleased.</p>
+      );
+    }
+
+    // Categories share one row, each sized to the space left over
+    return (
+      <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2 max-w-4xl">
+        {categories.map(({ category, watched, total }) => {
+          const { title, icon: Icon } = categoryDescriptor(category);
+          const seen = watched ?? 0;
+
+          return (
+            <div key={category} className="grow basis-56 max-w-sm">
+              <div className="flex items-center justify-between text-xs">
+                <span className="flex items-center text-dark-text-secondary">
+                  <Icon className="h-3.5 w-3.5 mr-1.5 text-dark-text-muted" />
+                  {title}
+                </span>
+                <span className="text-dark-text-muted">
+                  {seen}/{total} watched
+                </span>
+              </div>
+              <div className="mt-1 h-1.5 w-full rounded-full bg-dark-bg-tertiary overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-brand-blue"
+                  style={{ width: `${Math.round((seen / total) * 100)}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
   };
 
   const handleAddTags = () => {
@@ -185,6 +292,14 @@ const WatchItemsPage: React.FC = () => {
       </Layout>
     );
   }
+
+  const query = search.trim().toLowerCase();
+  const visibleItems = query
+    ? watchItems.filter(item =>
+        item.path.toLowerCase().includes(query) ||
+        (item.tags ?? []).some(tag => tag.toLowerCase().includes(query))
+      )
+    : watchItems;
 
   return (
     <Layout>
@@ -508,6 +623,33 @@ const WatchItemsPage: React.FC = () => {
           </div>
         )}
 
+        {/* Search */}
+        {watchItems.length > 0 && (
+          <div className="mt-6 flex items-center gap-3">
+            <div className="relative flex-1 max-w-md">
+              <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-dark-text-muted" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="input-field w-full pl-9"
+                placeholder="Search by name or tag"
+                aria-label="Search watch items by name or tag"
+              />
+            </div>
+            {query && (
+              <button type="button" onClick={() => setSearch('')} className="btn-secondary text-sm">
+                Clear
+              </button>
+            )}
+            {query && (
+              <span className="text-sm text-dark-text-muted">
+                {visibleItems.length} of {watchItems.length}
+              </span>
+            )}
+          </div>
+        )}
+
         {/* Watch Items List */}
         <div className="mt-6">
           {watchItems.length === 0 ? (
@@ -518,16 +660,24 @@ const WatchItemsPage: React.FC = () => {
                 Get started by adding a Letterboxd list to sync.
               </p>
             </div>
+          ) : visibleItems.length === 0 ? (
+            <div className="text-center py-12">
+              <MagnifyingGlassIcon className="mx-auto h-12 w-12 text-dark-text-muted" />
+              <h3 className="mt-2 text-sm font-medium text-dark-text-primary">No matching watch items</h3>
+              <p className="mt-1 text-sm text-dark-text-muted">
+                No list name or tag matches "{search.trim()}".
+              </p>
+            </div>
           ) : (
             <div className="card overflow-hidden">
               <ul className="divide-y divide-dark-border">
-                {watchItems.map((item) => (
+                {visibleItems.map((item) => (
                   <li key={item.id} className="px-6 py-4">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-start justify-between">
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center">
-                          <FilmIcon className="h-5 w-5 text-dark-text-muted mr-3" />
-                          <div>
+                        <div className="flex items-start">
+                          <FilmIcon className="h-5 w-5 text-dark-text-muted mr-3 mt-0.5" />
+                          <div className="min-w-0 flex-1">
                             <p className="text-sm font-medium text-dark-text-primary truncate">
                               letterboxd.com/{item.path}
                             </p>
@@ -546,10 +696,11 @@ const WatchItemsPage: React.FC = () => {
                                 </span>
                               ))}
                             </div>
+                            {renderProgress(item)}
                           </div>
                         </div>
                       </div>
-                      <div className="flex items-center space-x-2">
+                      <div className="flex items-center space-x-2 ml-4">
                         <a
                           href={`/movies/${item.id}`}
                           className="text-brand-blue hover:text-brand-blue/80 text-sm font-medium"

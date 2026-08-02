@@ -190,6 +190,41 @@ const ConfigPage: React.FC = () => {
             </div>
           </div>
 
+          {/* Letterboxd Profile */}
+          <div className="card px-4 py-5 sm:p-6">
+            <div className="md:grid md:grid-cols-3 md:gap-6">
+              <div className="md:col-span-1">
+                <h3 className="text-lg font-medium leading-6 text-dark-text-primary">Letterboxd Profile</h3>
+                <p className="mt-1 text-sm text-dark-text-muted">
+                  Your Letterboxd username, used to flag films you have already watched.
+                </p>
+              </div>
+              <div className="mt-5 md:mt-0 md:col-span-2">
+                <div className="grid grid-cols-3 gap-6">
+                  <div className="col-span-3 sm:col-span-2">
+                    <label htmlFor="letterboxd.username" className="block text-sm font-medium text-dark-text-secondary">
+                      Username (optional)
+                    </label>
+                    <div className="mt-1 flex rounded-md shadow-sm">
+                      <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-dark-border bg-dark-bg-tertiary text-dark-text-muted text-sm">
+                        letterboxd.com/
+                      </span>
+                      <input
+                        type="text"
+                        {...register('letterboxd.username')}
+                        className="input-field rounded-none rounded-r-md w-full"
+                        placeholder="your-username"
+                      />
+                    </div>
+                    <p className="mt-2 text-sm text-dark-text-muted">
+                      Leave empty to hide the watched indicator on the movies pages. The profile must be public.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Letterboxd Configuration */}
           <div className="card px-4 py-5 sm:p-6">
             <div className="md:grid md:grid-cols-3 md:gap-6">

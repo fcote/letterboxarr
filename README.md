@@ -20,6 +20,9 @@ Automatically sync your Letterboxd lists to your Radarr instance. This script pe
 - 🔍 Smart movie matching using title and year, falling back to TMDB ID
 - ⚡ Configurable sync interval and filters
 - 🎭 Per-list filtering (skip documentaries, short films, etc.)
+- 🗂️ Movies view split into films, short films, documentaries and TV shows
+- 👁️ Flags the films you have already watched on your Letterboxd profile
+- 📊 Per-category watched progress on each watch item
 - ⚙️ YAML configuration file support
 - 🌐 Web interface for configuration and monitoring
 

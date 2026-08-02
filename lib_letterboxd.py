@@ -3,7 +3,8 @@ import time
 import json
 import hashlib
 import os
-from typing import List, Dict, Optional
+from threading import RLock
+from typing import List, Dict, Optional, Set
 from urllib.parse import urljoin
 
 from curl_cffi import requests
@@ -11,16 +12,44 @@ from bs4 import BeautifulSoup
 
 from lib_config import WatchListItem, create_letterboxd_cookie_filters, LetterboxdFilters
 
+# Categories a Letterboxd entry can be sorted into
+CATEGORY_FILM = 'film'
+CATEGORY_SHORT_FILM = 'short_film'
+CATEGORY_DOCUMENTARY = 'documentary'
+CATEGORY_TV_SHOW = 'tv_show'
+CATEGORY_UNRELEASED = 'unreleased'
+
+# Category detection order, paired with the filter that hides it on Letterboxd.
+# Categories overlap (a short documentary is both, and anything can still be
+# unreleased), so the first match wins. Unreleased comes first: nothing in it can
+# be downloaded yet, whatever its type.
+CATEGORY_SKIP_FILTERS = [
+    (CATEGORY_UNRELEASED, 'skip_unreleased'),
+    (CATEGORY_TV_SHOW, 'skip_tv_shows'),
+    (CATEGORY_DOCUMENTARY, 'skip_documentaries'),
+    (CATEGORY_SHORT_FILM, 'skip_short_films'),
+]
+
+# Browser fingerprints to impersonate, tried in order. Letterboxd's bot
+# protection refuses some of them on member pages (a 403 on
+# /<user>/films/page/2/ while page 1 answers fine), and which ones are refused
+# changes over time, so a refused fingerprint falls through to the next.
+IMPERSONATIONS = ['chrome', 'chrome131', 'safari17_0']
+
 
 class LetterboxdScraper:
     """Scrapes Letterboxd for movie information from multiple sources"""
 
     def __init__(self, logger, cache_dir: str = 'data/cache', cache_ttl: int = 3600):
         self.logger = logger
-        self.session = requests.Session(impersonate="chrome")
+        self.impersonations = list(IMPERSONATIONS)
+        self.session = requests.Session(impersonate=self.impersonations[0])
         self.cache_dir = cache_dir
         self.cache_ttl = cache_ttl  # Cache TTL in seconds (default: 1 hour)
-        
+        # The session carries the filmFilter cookie, so only one crawl at a
+        # time: the API and the sync thread both share this scraper
+        self.crawl_lock = RLock()
+
         # Create cache directory if it doesn't exist
         if not os.path.exists(self.cache_dir):
             os.makedirs(self.cache_dir)
@@ -106,9 +135,46 @@ class LetterboxdScraper:
         self.logger.info(f"Found {len(unique_movies)} unique movies across all watch lists")
         return unique_movies
 
+    def _get(self, url: str):
+        """Fetch a Letterboxd page, falling back to another browser fingerprint on a 403
+
+        The working fingerprint is moved to the front so the rest of the crawl
+        stops paying for the refused ones.
+        """
+        response = None
+        for impersonate in list(self.impersonations):
+            response = self.session.get(url, impersonate=impersonate)
+            if response.status_code != 403:
+                self.impersonations.remove(impersonate)
+                self.impersonations.insert(0, impersonate)
+                break
+            self.logger.debug(f"Letterboxd refused fingerprint '{impersonate}' for {url}")
+
+        response.raise_for_status()
+        return response
+
+    def _set_film_filter(self, cookie_filters: str) -> None:
+        """Set the filmFilter cookie for the next requests, dropping any previous one
+
+        Letterboxd echoes the cookie back on the '.letterboxd.com' domain, so
+        setting a new value would otherwise leave the previous one in the jar and
+        keep filtering the listing with it.
+        """
+        for cookie in list(self.session.cookies.jar):
+            if cookie.name == 'filmFilter':
+                self.session.cookies.jar.clear(cookie.domain, cookie.path, cookie.name)
+
+        if cookie_filters:
+            self.session.cookies.set('filmFilter', cookie_filters, domain='letterboxd.com')
+
     def get_movies_from_path(self, watch_item: WatchListItem, global_filters: LetterboxdFilters,
                              limit: Optional[int] = None) -> List[Dict]:
         """Get movies from a specific Letterboxd path"""
+        with self.crawl_lock:
+            return self._crawl_path(watch_item, global_filters, limit)
+
+    def _crawl_path(self, watch_item: WatchListItem, global_filters: LetterboxdFilters,
+                    limit: Optional[int] = None) -> List[Dict]:
         # Check cache first
         cache_key = self._get_cache_key(watch_item, global_filters, limit)
         cache_file_path = self._get_cache_file_path(cache_key)
@@ -130,17 +196,15 @@ class LetterboxdScraper:
         else:
             cookie_filters = create_letterboxd_cookie_filters(global_filters)
 
-        if cookie_filters:
-            self.session.cookies.set('filmFilter', cookie_filters, domain='letterboxd.com')
-        
+        self._set_film_filter(cookie_filters)
+
         page = 1
         while True:
             page_url = url if page == 1 else urljoin(url, f"page/{page}/")
             self.logger.debug(f"Fetching page {page} from {watch_item.path}")
 
             try:
-                response = self.session.get(page_url)
-                response.raise_for_status()
+                response = self._get(page_url)
             except requests.RequestsError as e:
                 self.logger.error(f"Error fetching page {page} from {watch_item.path}: {e}")
                 break
@@ -180,12 +244,69 @@ class LetterboxdScraper:
         
         return movies
 
+    def get_movies_from_path_by_category(self, watch_item: WatchListItem, global_filters: LetterboxdFilters,
+                                         limit: Optional[int] = None) -> List[Dict]:
+        """Get movies from a Letterboxd path, each tagged with a 'category'
+
+        Letterboxd does not expose the category in the listing markup, but it can
+        hide a category through the filmFilter cookie. Each category is therefore
+        resolved by diffing the listing against the same listing with that single
+        category hidden. Categories already excluded by the watch item filters
+        cannot appear in the listing, so they cost no extra request.
+        """
+        movies = self.get_movies_from_path(watch_item, global_filters, limit)
+        effective_filters = watch_item.filters or global_filters
+
+        categories = {}
+        for category, skip_attr in CATEGORY_SKIP_FILTERS:
+            if getattr(effective_filters, skip_attr, False):
+                continue
+
+            hidden_item = self._with_hidden_category(watch_item, effective_filters, skip_attr)
+            kept_slugs = {
+                movie['letterboxd_slug']
+                for movie in self.get_movies_from_path(hidden_item, global_filters, limit)
+            }
+            for movie in movies:
+                slug = movie['letterboxd_slug']
+                if slug not in kept_slugs:
+                    categories.setdefault(slug, category)
+
+        return [
+            {**movie, 'category': categories.get(movie['letterboxd_slug'], CATEGORY_FILM)}
+            for movie in movies
+        ]
+
+    def get_watched_slugs(self, username: str) -> Set[str]:
+        """Get the slugs of every film the Letterboxd user has marked as watched
+
+        Read from the member's public /films/ page, so no filters apply: the
+        point is to know the whole watched history, not a filtered view of it.
+        """
+        watched_item = WatchListItem(path=f"{username}/films", filters=LetterboxdFilters())
+        movies = self.get_movies_from_path(watched_item, LetterboxdFilters())
+        self.logger.debug(f"{username} has watched {len(movies)} films")
+        return {movie['letterboxd_slug'] for movie in movies}
+
+    @staticmethod
+    def _with_hidden_category(watch_item: WatchListItem, effective_filters: LetterboxdFilters,
+                              skip_attr: str) -> WatchListItem:
+        """Copy a watch item with one extra category hidden by its filters"""
+        filters = LetterboxdFilters(**effective_filters.to_dict())
+        setattr(filters, skip_attr, True)
+        return WatchListItem(
+            path=watch_item.path,
+            filters=filters,
+            tags=list(watch_item.tags),
+            auto_add=watch_item.auto_add
+        )
+
     def get_movie_tmdb_id(self, letterboxd_slug: str) -> Optional[int]:
         """Fetch TMDB ID for a movie from Letterboxd"""
         url = f"https://letterboxd.com/film/{letterboxd_slug}/"
         try:
-            response = self.session.get(url)
-            response.raise_for_status()
+            with self.crawl_lock:
+                response = self._get(url)
         except requests.RequestsError as e:
             self.logger.error(f"Error fetching movie page: {e}")
             return None
