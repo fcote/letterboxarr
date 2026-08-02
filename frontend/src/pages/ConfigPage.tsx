@@ -1,14 +1,16 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useForm } from 'react-hook-form';
-import { configAPI } from '../utils/api';
-import { Config } from '../types';
+import { configAPI, radarrAPI } from '../utils/api';
+import { Config, QualityProfile } from '../types';
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
 
 const ConfigPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<Config>();
+  const [profiles, setProfiles] = useState<QualityProfile[] | null>(null);
+  const [profilesError, setProfilesError] = useState<string | null>(null);
+  const { register, handleSubmit, reset, watch, formState: { errors } } = useForm<Config>();
 
   const loadConfig = useCallback(async () => {
     try {
@@ -21,9 +23,21 @@ const ConfigPage: React.FC = () => {
     }
   }, [reset]);
 
+  // Fetched apart from the config so a Radarr that is down or misconfigured
+  // still leaves this page usable — it is where that gets fixed
+  const loadProfiles = useCallback(async () => {
+    try {
+      const { profiles: fetched } = await radarrAPI.getQualityProfiles();
+      setProfiles(fetched);
+    } catch (error: any) {
+      setProfilesError(error.response?.data?.detail || 'Could not reach Radarr');
+    }
+  }, []);
+
   useEffect(() => {
     loadConfig();
-  }, [loadConfig]);
+    loadProfiles();
+  }, [loadConfig, loadProfiles]);
 
   const onSubmit = async (data: Config) => {
     setSaving(true);
@@ -46,6 +60,8 @@ const ConfigPage: React.FC = () => {
       </Layout>
     );
   }
+
+  const selectedProfile = watch('radarr.quality_profile');
 
   return (
     <Layout>
@@ -131,16 +147,47 @@ const ConfigPage: React.FC = () => {
 
                   <div className="col-span-3">
                     <label htmlFor="radarr.quality_profile" className="block text-sm font-medium text-dark-text-secondary">
-                      Quality Profile ID
+                      Quality Profile
                     </label>
-                    <input
-                      type="number"
-                      {...register('radarr.quality_profile', { required: true, min: 1 })}
-                      className="input-field"
-                      placeholder="1"
-                    />
+                    {profilesError ? (
+                      <>
+                        <input
+                          type="number"
+                          {...register('radarr.quality_profile', { required: true, min: 1, valueAsNumber: true })}
+                          className="input-field"
+                          placeholder="1"
+                        />
+                        <p className="mt-2 text-sm text-dark-text-muted">
+                          {profilesError}. Enter the profile ID by hand, or correct the URL and API
+                          key above, save, and reload to pick from a list.
+                        </p>
+                      </>
+                    ) : profiles === null ? (
+                      <div className="input-field flex items-center text-dark-text-muted">
+                        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-dark-text-muted mr-2"></div>
+                        Loading profiles from Radarr...
+                      </div>
+                    ) : (
+                      <select
+                        {...register('radarr.quality_profile', { required: true, valueAsNumber: true })}
+                        className="input-field"
+                      >
+                        {/* A profile deleted in Radarr would otherwise silently
+                            become whichever one happens to be listed first */}
+                        {!profiles.some(profile => profile.id === selectedProfile) && (
+                          <option value={selectedProfile}>
+                            Profile {selectedProfile} (no longer in Radarr)
+                          </option>
+                        )}
+                        {profiles.map(profile => (
+                          <option key={profile.id} value={profile.id}>
+                            {profile.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                     {errors.radarr?.quality_profile && (
-                      <p className="mt-2 text-sm text-brand-orange">Quality profile ID is required</p>
+                      <p className="mt-2 text-sm text-brand-orange">A quality profile is required</p>
                     )}
                   </div>
 

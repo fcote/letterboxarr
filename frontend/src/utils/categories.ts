@@ -6,7 +6,7 @@ import {
   TvIcon,
   VideoCameraIcon
 } from '@heroicons/react/24/outline';
-import { MovieCategory } from '../types';
+import { CategoryProgress, MovieCategory } from '../types';
 
 export interface CategoryDescriptor {
   category: MovieCategory;
@@ -51,3 +51,8 @@ export const MOVIE_CATEGORIES: CategoryDescriptor[] = [
 
 export const categoryDescriptor = (category: MovieCategory): CategoryDescriptor =>
   MOVIE_CATEGORIES.find(descriptor => descriptor.category === category) ?? MOVIE_CATEGORIES[0];
+
+// Categories worth a progress bar. Unreleased entries cannot have been watched,
+// so their bar would always read 0, and an empty category has nothing to show.
+export const progressCategories = (categories: CategoryProgress[]): CategoryProgress[] =>
+  categories.filter(category => category.total > 0 && category.category !== 'unreleased');

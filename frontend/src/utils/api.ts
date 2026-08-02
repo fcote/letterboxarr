@@ -1,5 +1,5 @@
 import axios, { AxiosResponse } from 'axios';
-import { Config, LoginCredentials, Token, WatchItem, WatchItemMovies, WatchItemProgress, LetterboxdTestResult } from '../types';
+import { Config, DashboardSummary, LoginCredentials, QualityProfile, SyncStatus, Token, WatchItem, WatchItemMovies, WatchItemProgress, LetterboxdTestResult } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -65,6 +65,10 @@ export const watchItemsAPI = {
     const response: AxiosResponse<WatchItemProgress> = await api.get(`/watch-items/${id}/progress`);
     return response.data;
   },
+  refresh: async (id: number): Promise<{ item_id: number; path: string; cleared: number }> => {
+    const response = await api.post(`/watch-items/${id}/refresh`);
+    return response.data;
+  },
 };
 
 export const moviesAPI = {
@@ -82,6 +86,13 @@ export const moviesAPI = {
   },
 };
 
+export const radarrAPI = {
+  getQualityProfiles: async (): Promise<{ profiles: QualityProfile[] }> => {
+    const response = await api.get('/radarr/quality-profiles');
+    return response.data;
+  },
+};
+
 export const letterboxdAPI = {
   testWatchItem: async (item: Omit<WatchItem, 'id'>): Promise<LetterboxdTestResult> => {
     const response: AxiosResponse<LetterboxdTestResult> = await api.post('/test-watch-item', item);
@@ -92,6 +103,17 @@ export const letterboxdAPI = {
 export const syncAPI = {
   run: async (): Promise<{ message: string }> => {
     const response = await api.post('/sync/run');
+    return response.data;
+  },
+  getStatus: async (): Promise<SyncStatus> => {
+    const response: AxiosResponse<SyncStatus> = await api.get('/sync/status');
+    return response.data;
+  },
+};
+
+export const dashboardAPI = {
+  get: async (): Promise<DashboardSummary> => {
+    const response: AxiosResponse<DashboardSummary> = await api.get('/dashboard');
     return response.data;
   },
 };

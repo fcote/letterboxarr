@@ -2,7 +2,6 @@ import re
 import time
 import json
 import hashlib
-import os
 from threading import RLock
 from typing import List, Dict, Optional, Set
 from urllib.parse import urljoin
@@ -11,6 +10,7 @@ from curl_cffi import requests
 from bs4 import BeautifulSoup
 
 from lib_config import WatchListItem, create_letterboxd_cookie_filters, LetterboxdFilters
+from lib_db import Database
 
 # Categories a Letterboxd entry can be sorted into
 CATEGORY_FILM = 'film'
@@ -40,21 +40,18 @@ IMPERSONATIONS = ['chrome', 'chrome131', 'safari17_0']
 class LetterboxdScraper:
     """Scrapes Letterboxd for movie information from multiple sources"""
 
-    def __init__(self, logger, cache_dir: str = 'data/cache', cache_ttl: int = 3600):
+    def __init__(self, logger, db: Database):
         self.logger = logger
+        self.db = db
         self.impersonations = list(IMPERSONATIONS)
         self.session = requests.Session(impersonate=self.impersonations[0])
-        self.cache_dir = cache_dir
-        self.cache_ttl = cache_ttl  # Cache TTL in seconds (default: 1 hour)
         # The session carries the filmFilter cookie, so only one crawl at a
         # time: the API and the sync thread both share this scraper
         self.crawl_lock = RLock()
 
-        # Create cache directory if it doesn't exist
-        if not os.path.exists(self.cache_dir):
-            os.makedirs(self.cache_dir)
-
-    def _get_cache_key(self, watch_item: WatchListItem, global_filters: LetterboxdFilters, limit: Optional[int] = None) -> str:
+    @staticmethod
+    def _get_cache_key(watch_item: WatchListItem, global_filters: LetterboxdFilters,
+                       limit: Optional[int] = None) -> str:
         """Generate a cache key based on watch item path, filters, and limit"""
         key_data = {
             'path': watch_item.path,
@@ -66,35 +63,6 @@ class LetterboxdScraper:
 
         key_string = json.dumps(key_data, sort_keys=True)
         return hashlib.md5(key_string.encode()).hexdigest()
-
-    def _get_cache_file_path(self, cache_key: str) -> str:
-        """Get the full path to a cache file"""
-        return os.path.join(self.cache_dir, f"movies_{cache_key}.json")
-
-    def _is_cache_valid(self, cache_file_path: str) -> bool:
-        """Check if cache file exists and is still valid (not expired)"""
-        if not os.path.exists(cache_file_path):
-            return False
-        
-        file_age = time.time() - os.path.getmtime(cache_file_path)
-        return file_age < self.cache_ttl
-
-    def _load_from_cache(self, cache_file_path: str) -> Optional[List[Dict]]:
-        """Load movies from cache file"""
-        try:
-            with open(cache_file_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
-            self.logger.warning(f"Error loading cache file {cache_file_path}: {e}")
-            return None
-
-    def _save_to_cache(self, cache_file_path: str, movies: List[Dict]) -> None:
-        """Save movies to cache file"""
-        try:
-            with open(cache_file_path, 'w', encoding='utf-8') as f:
-                json.dump(movies, f, ensure_ascii=False, indent=2)
-        except IOError as e:
-            self.logger.warning(f"Error saving cache file {cache_file_path}: {e}")
 
     def get_movies_from_watch_lists(self, watch_items: List[WatchListItem], global_filters: LetterboxdFilters) -> List[Dict]:
         """Fetch and parse movies from multiple watch lists"""
@@ -177,19 +145,44 @@ class LetterboxdScraper:
                     limit: Optional[int] = None) -> List[Dict]:
         # Check cache first
         cache_key = self._get_cache_key(watch_item, global_filters, limit)
-        cache_file_path = self._get_cache_file_path(cache_key)
-        
-        if self._is_cache_valid(cache_file_path):
-            cached_movies = self._load_from_cache(cache_file_path)
-            if cached_movies is not None:
-                self.logger.debug(f"Loading {len(cached_movies)} movies from cache for {watch_item.path}")
-                return cached_movies
-        
-        # Cache miss or invalid, fetch from web
+
+        cached_movies = self.db.get_cached_crawl(cache_key)
+        if cached_movies is not None:
+            self.logger.debug(f"Loading {len(cached_movies)} movies from cache for {watch_item.path}")
+            return cached_movies
+
+        # Cache miss or expired, fetch from web
         self.logger.debug(f"Cache miss for {watch_item.path}, fetching from web")
+        movies = self._fetch_path(watch_item, global_filters, limit)
+
+        # An empty result is more often a refused page than an empty list, and
+        # caching it would keep the list empty for the whole TTL
+        if len(movies) > 0:
+            self.db.save_crawl(cache_key, watch_item.path, movies)
+
+        return movies
+
+    def _fetch_path(self, watch_item: WatchListItem, global_filters: LetterboxdFilters,
+                    limit: Optional[int] = None) -> List[Dict]:
+        """Crawl every page of a Letterboxd path, without touching the cache"""
         movies = []
+        for page_movies in self._iter_pages(watch_item, global_filters):
+            movies.extend(page_movies)
+            if limit and len(movies) >= limit:
+                movies = movies[:limit]
+                break
+
+        self.logger.info(f"Found {len(movies)} movies in {watch_item.path}")
+        return movies
+
+    def _iter_pages(self, watch_item: WatchListItem, global_filters: LetterboxdFilters):
+        """Yield the films of a Letterboxd path one page at a time
+
+        Pages are only fetched as the caller asks for them, so a caller that has
+        seen enough stops the crawl by walking away from the generator.
+        """
         url = f"https://letterboxd.com/{watch_item.path}/"
-        
+
         # Set up filters as cookies if specified
         if watch_item.filters:
             cookie_filters = create_letterboxd_cookie_filters(watch_item.filters)
@@ -207,7 +200,7 @@ class LetterboxdScraper:
                 response = self._get(page_url)
             except requests.RequestsError as e:
                 self.logger.error(f"Error fetching page {page} from {watch_item.path}: {e}")
-                break
+                return
 
             soup = BeautifulSoup(response.content, 'html.parser')
 
@@ -216,33 +209,20 @@ class LetterboxdScraper:
 
             if not movie_items:
                 self.logger.debug(f"No more movies found on page {page} of {watch_item.path}")
-                break
+                return
 
-            for item in movie_items:
-                movie_data = self._extract_movie_data(item)
-                if movie_data:
-                    movies.append(movie_data)
-                if limit and len(movies) >= limit:
-                    self.logger.info(f"Found {len(movies)} movies in {watch_item.path}")
-                    # Save to cache before returning
-                    self._save_to_cache(cache_file_path, movies)
-                    return movies
+            yield [
+                movie for movie in (self._extract_movie_data(item) for item in movie_items)
+                if movie
+            ]
 
             # Check if there's a next page
             next_page = soup.find('a', class_='next')
             if not next_page:
-                break
+                return
 
             page += 1
             time.sleep(1)  # Be respectful to the server
-
-        self.logger.info(f"Found {len(movies)} movies in {watch_item.path}")
-        
-        # Save to cache
-        if len(movies) > 0:
-            self._save_to_cache(cache_file_path, movies)
-        
-        return movies
 
     def get_movies_from_path_by_category(self, watch_item: WatchListItem, global_filters: LetterboxdFilters,
                                          limit: Optional[int] = None) -> List[Dict]:
@@ -282,11 +262,91 @@ class LetterboxdScraper:
 
         Read from the member's public /films/ page, so no filters apply: the
         point is to know the whole watched history, not a filtered view of it.
+        The watched films are stored in their own table rather than the crawl
+        cache, so a refresh that fails can fall back on the last known set
+        instead of reporting nothing as watched.
+
+        Once a profile is known it is topped up rather than re-read, which for a
+        member with thousands of films is one page instead of dozens. Only a
+        whole re-read notices a film that is no longer watched, so one is still
+        done daily.
         """
+        stored = self.db.get_watched_slugs(username)
+        if stored is not None:
+            self.logger.debug(f"{username} has watched {len(stored)} films (stored)")
+            return stored
+
+        known = self.db.get_watched_slugs(username, fresh_only=False)
+        if known is None or self.db.needs_full_watched_refresh(username):
+            return self._read_watched(username, known)
+        return self._top_up_watched(username, known)
+
+    def _read_watched(self, username: str, known: Optional[Set[str]]) -> Set[str]:
+        """Read a member's whole watched history, replacing what is stored"""
         watched_item = WatchListItem(path=f"{username}/films", filters=LetterboxdFilters())
-        movies = self.get_movies_from_path(watched_item, LetterboxdFilters())
-        self.logger.debug(f"{username} has watched {len(movies)} films")
+        try:
+            with self.crawl_lock:
+                movies = self._fetch_path(watched_item, LetterboxdFilters())
+        except Exception as e:
+            if known is None:
+                raise
+            self.logger.warning(f"Could not refresh watched films for {username}, reusing the stored set: {e}")
+            return known
+
+        # Same reasoning as the crawl cache: an empty profile page is far more
+        # likely a refused request than a member who has watched nothing
+        if not movies:
+            if known is not None:
+                self.logger.warning(f"Letterboxd returned no watched films for {username}, reusing the stored set")
+                return known
+            return set()
+
+        self.db.save_watched_films(username, movies)
+        self.logger.info(f"{username} has watched {len(movies)} films")
         return {movie['letterboxd_slug'] for movie in movies}
+
+    def _top_up_watched(self, username: str, known: Set[str]) -> Set[str]:
+        """Add whatever a member has watched since the profile was last read
+
+        /films/by/date/ is ordered by when each film was logged, newest first, so
+        the crawl stops at the first page that holds nothing new. Stopping on a
+        whole page rather than the first familiar film leaves room for films
+        logged on the same day to come back in a different order.
+        """
+        recent_item = WatchListItem(path=f"{username}/films/by/date", filters=LetterboxdFilters())
+        # Films logged while the crawl is running push the rest of the listing
+        # back a place, so the same film can turn up on two consecutive pages
+        seen = set(known)
+        added = []
+        pages = 0
+
+        try:
+            with self.crawl_lock:
+                for page_movies in self._iter_pages(recent_item, LetterboxdFilters()):
+                    pages += 1
+                    fresh = [
+                        movie for movie in page_movies
+                        if movie['letterboxd_slug'] not in seen
+                    ]
+                    if not fresh:
+                        break
+                    seen.update(movie['letterboxd_slug'] for movie in fresh)
+                    added.extend(fresh)
+        except Exception as e:
+            self.logger.warning(f"Could not top up watched films for {username}, reusing the stored set: {e}")
+            return known
+
+        if pages == 0:
+            # Not even the first page came back; treat it as a failed refresh
+            self.logger.warning(f"Letterboxd returned no watched films for {username}, reusing the stored set")
+            return known
+
+        self.db.add_watched_films(username, added)
+        self.logger.info(
+            f"{username} has watched {len(added)} more films since the last check "
+            f"({len(seen)} in total, read {pages} page(s))"
+        )
+        return seen
 
     @staticmethod
     def _with_hidden_category(watch_item: WatchListItem, effective_filters: LetterboxdFilters,

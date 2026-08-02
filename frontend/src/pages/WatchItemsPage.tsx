@@ -1,10 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { watchItemsAPI, letterboxdAPI } from '../utils/api';
 import { WatchItem, WatchItemProgress, LetterboxdTestResult } from '../types';
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
-import { categoryDescriptor } from '../utils/categories';
+import CategoryProgressBars from '../components/CategoryProgressBars';
+import { progressCategories } from '../utils/categories';
 import {
+  ArrowPathIcon,
   PlusIcon,
   TrashIcon,
   CheckCircleIcon,
@@ -48,6 +51,23 @@ const WatchItemsPage: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState<number | null>(null);
+  const [refreshing, setRefreshing] = useState<number | null>(null);
+
+  // A run is abandoned as soon as a newer one starts, so a reload of the whole
+  // list does not get overwritten by crawls left over from the previous one
+  const loadItemProgress = useCallback(async (id: number, run: number) => {
+    if (run !== progressRun.current) return;
+
+    setProgress(previous => ({ ...previous, [id]: 'loading' }));
+    try {
+      const itemProgress = await watchItemsAPI.getProgress(id);
+      if (run !== progressRun.current) return;
+      setProgress(previous => ({ ...previous, [id]: itemProgress }));
+    } catch (error: any) {
+      if (run !== progressRun.current) return;
+      setProgress(previous => ({ ...previous, [id]: 'error' }));
+    }
+  }, []);
 
   // One list at a time: the server crawls Letterboxd and serialises the crawls anyway
   const loadProgress = useCallback(async (items: WatchItem[]) => {
@@ -57,18 +77,9 @@ const WatchItemsPage: React.FC = () => {
 
     for (const item of items) {
       if (item.id === undefined || run !== progressRun.current) return;
-
-      setProgress(previous => ({ ...previous, [item.id!]: 'loading' }));
-      try {
-        const itemProgress = await watchItemsAPI.getProgress(item.id);
-        if (run !== progressRun.current) return;
-        setProgress(previous => ({ ...previous, [item.id!]: itemProgress }));
-      } catch (error: any) {
-        if (run !== progressRun.current) return;
-        setProgress(previous => ({ ...previous, [item.id!]: 'error' }));
-      }
+      await loadItemProgress(item.id, run);
     }
-  }, []);
+  }, [loadItemProgress]);
 
   const loadWatchItems = useCallback(async () => {
     try {
@@ -120,10 +131,7 @@ const WatchItemsPage: React.FC = () => {
       );
     }
 
-    // Unreleased entries cannot have been watched, so their bar would always read 0
-    const categories = state.categories.filter(
-      category => category.total > 0 && category.category !== 'unreleased'
-    );
+    const categories = progressCategories(state.categories);
 
     if (categories.length === 0) {
       return (
@@ -131,35 +139,7 @@ const WatchItemsPage: React.FC = () => {
       );
     }
 
-    // Categories share one row, each sized to the space left over
-    return (
-      <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2 max-w-4xl">
-        {categories.map(({ category, watched, total }) => {
-          const { title, icon: Icon } = categoryDescriptor(category);
-          const seen = watched ?? 0;
-
-          return (
-            <div key={category} className="grow basis-56 max-w-sm">
-              <div className="flex items-center justify-between text-xs">
-                <span className="flex items-center text-dark-text-secondary">
-                  <Icon className="h-3.5 w-3.5 mr-1.5 text-dark-text-muted" />
-                  {title}
-                </span>
-                <span className="text-dark-text-muted">
-                  {seen}/{total} watched
-                </span>
-              </div>
-              <div className="mt-1 h-1.5 w-full rounded-full bg-dark-bg-tertiary overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-brand-blue"
-                  style={{ width: `${Math.round((seen / total) * 100)}%` }}
-                />
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    );
+    return <CategoryProgressBars categories={categories} className="mt-3 max-w-4xl" />;
   };
 
   const handleAddTags = () => {
@@ -265,6 +245,22 @@ const WatchItemsPage: React.FC = () => {
       toast.error(error.response?.data?.detail || 'Failed to update watch item');
     } finally {
       setEditing(false);
+    }
+  };
+
+  const handleRefresh = async (item: WatchItem) => {
+    if (item.id === undefined) return;
+
+    setRefreshing(item.id);
+    try {
+      await watchItemsAPI.refresh(item.id);
+      // Reading it back is what re-crawls it, so the progress bar reloads too
+      await loadItemProgress(item.id, progressRun.current);
+      toast.success(`letterboxd.com/${item.path} re-read from Letterboxd`);
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || 'Failed to refresh this watch item');
+    } finally {
+      setRefreshing(null);
     }
   };
 
@@ -701,17 +697,28 @@ const WatchItemsPage: React.FC = () => {
                         </div>
                       </div>
                       <div className="flex items-center space-x-2 ml-4">
-                        <a
-                          href={`/movies/${item.id}`}
+                        <Link
+                          to={`/movies/${item.id}`}
                           className="text-brand-blue hover:text-brand-blue/80 text-sm font-medium"
                         >
                           View Movies
-                        </a>
+                        </Link>
                         <button
                           onClick={() => handleEditClick(item)}
                           className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-dark-text-muted hover:bg-dark-bg-tertiary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-blue"
+                          title="Edit this watch item"
+                          aria-label={`Edit letterboxd.com/${item.path}`}
                         >
                           <PencilIcon className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => handleRefresh(item)}
+                          disabled={refreshing === item.id}
+                          className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-dark-text-muted hover:bg-dark-bg-tertiary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-blue disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Discard what is cached for this list and read it from Letterboxd again"
+                          aria-label={`Refresh letterboxd.com/${item.path}`}
+                        >
+                          <ArrowPathIcon className={`h-4 w-4 ${refreshing === item.id ? 'animate-spin' : ''}`} />
                         </button>
                         <button
                           onClick={() => handleDelete(item.id!)}

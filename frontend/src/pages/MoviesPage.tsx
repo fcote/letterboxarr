@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { moviesAPI } from '../utils/api';
+import { moviesAPI, watchItemsAPI } from '../utils/api';
 import { WatchItemMovies, Movie } from '../types';
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
+import { ProgressTrack } from '../components/CategoryProgressBars';
 import { MOVIE_CATEGORIES } from '../utils/categories';
 import {
+  ArrowPathIcon,
   CheckCircleIcon,
   ExclamationCircleIcon,
   EyeIcon,
@@ -18,6 +20,7 @@ const MoviesPage: React.FC = () => {
   const { itemId } = useParams<{ itemId: string }>();
   const [movieData, setMovieData] = useState<WatchItemMovies | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [addingMovie, setAddingMovie] = useState<string | null>(null);
 
   useEffect(() => {
@@ -34,6 +37,23 @@ const MoviesPage: React.FC = () => {
       toast.error('Failed to load movies');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRefresh = async () => {
+    if (!itemId) return;
+
+    const id = parseInt(itemId);
+    setRefreshing(true);
+    try {
+      await watchItemsAPI.refresh(id);
+      // Reading it back is what re-crawls it
+      await loadMovies(id);
+      toast.success('List re-read from Letterboxd');
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || 'Failed to refresh this list');
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -92,11 +112,21 @@ const MoviesPage: React.FC = () => {
   const unprocessedCount = movieData.movies.length - processedCount;
   const watchedCount = movieData.watched_count;
 
+  // The movies already carry their category and watched flag, so each section
+  // counts its own progress. Null means there is none to show, and the section
+  // keeps a plain count: unreleased entries cannot have been watched, and
+  // without a Letterboxd profile nothing is known to have been.
   const sections = MOVIE_CATEGORIES
-    .map(section => ({
-      ...section,
-      movies: movieData.movies.filter(movie => (movie.category ?? 'film') === section.category)
-    }))
+    .map(section => {
+      const movies = movieData.movies.filter(movie => (movie.category ?? 'film') === section.category);
+      return {
+        ...section,
+        movies,
+        watched: watchedCount == null || section.category === 'unreleased'
+          ? null
+          : movies.filter(movie => movie.watched).length
+      };
+    })
     .filter(section => section.movies.length > 0);
 
   const renderMovie = (movie: Movie, key: React.Key, Icon: React.ComponentType<React.ComponentProps<'svg'>>) => {
@@ -180,25 +210,36 @@ const MoviesPage: React.FC = () => {
   return (
     <Layout>
       <div className="px-4 py-6 sm:px-0">
-        <div className="border-b border-dark-border pb-5">
-          <h1 className="text-2xl font-bold leading-6 text-dark-text-primary">
-            Movies from {movieData.watch_item.path}
-          </h1>
-          <p className="mt-2 max-w-4xl text-sm text-dark-text-muted">
-            Viewing {movieData.total_count} movies from this Letterboxd list.
-          </p>
-          {movieData.watch_item.tags && movieData.watch_item.tags.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-2">
-              {movieData.watch_item.tags.map((tag, index) => (
-                <span
-                  key={index}
-                  className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-brand-blue/20 text-brand-blue border border-brand-blue/30"
-                >
-                  {tag}
-                </span>
-              ))}
-            </div>
-          )}
+        <div className="border-b border-dark-border pb-5 flex justify-between items-start gap-4">
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold leading-6 text-dark-text-primary">
+              Movies from {movieData.watch_item.path}
+            </h1>
+            <p className="mt-2 max-w-4xl text-sm text-dark-text-muted">
+              Viewing {movieData.total_count} movies from this Letterboxd list.
+            </p>
+            {movieData.watch_item.tags && movieData.watch_item.tags.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {movieData.watch_item.tags.map((tag, index) => (
+                  <span
+                    key={index}
+                    className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-brand-blue/20 text-brand-blue border border-brand-blue/30"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="btn-secondary flex items-center text-sm flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Discard what is cached for this list and read it from Letterboxd again"
+          >
+            <ArrowPathIcon className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+            {refreshing ? 'Refreshing...' : 'Refresh'}
+          </button>
         </div>
 
         {/* Statistics */}
@@ -280,9 +321,22 @@ const MoviesPage: React.FC = () => {
                   <h3 className="text-lg leading-6 font-medium text-dark-text-primary">
                     {section.title}
                   </h3>
-                  <span className="ml-3 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-dark-border text-dark-text-muted">
-                    {section.movies.length}
-                  </span>
+                  {section.watched === null ? (
+                    <span className="ml-3 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-dark-border text-dark-text-muted">
+                      {section.movies.length}
+                    </span>
+                  ) : (
+                    <div className="ml-4 flex items-center gap-2">
+                      <ProgressTrack
+                        watched={section.watched}
+                        total={section.movies.length}
+                        className="w-48"
+                      />
+                      <span className="text-xs text-dark-text-muted whitespace-nowrap">
+                        {section.watched}/{section.movies.length} watched
+                      </span>
+                    </div>
+                  )}
                 </div>
                 <p className="mt-1 max-w-2xl text-sm text-dark-text-muted">
                   {section.description}

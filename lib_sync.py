@@ -1,60 +1,69 @@
-import json
-import os
 import time
-from threading import Thread, Event
+from threading import Lock, Thread, Event
+from typing import Dict, List, Optional, Tuple
 
+from lib_db import Database, get_database
 from lib_letterboxd import LetterboxdScraper
 from lib_radarr import RadarrAPI, MultipleMatchesError
 from lib_config import Config
 
 
+def movie_key(movie: Dict) -> str:
+    """The id a movie is recorded under once added to Radarr"""
+    return f"{movie['title']}_{movie.get('year', 'unknown')}"
+
+
 class LetterboxarrSync:
     """Main sync orchestrator"""
 
-    # Data directory
-    DATA_DIR = './data'
-
-    # Filepath for processed movies
-    PROCESSED_MOVIES_FILEPATH = './data/processed_movies.json'
-
-    def __init__(self, logger, config: Config):
+    def __init__(self, logger, config: Config, db: Optional[Database] = None):
         self.logger = logger
         self.config = config
-        self.letterboxd = LetterboxdScraper(logger)
+        self.db = db or get_database(logger)
+        self.letterboxd = LetterboxdScraper(logger, self.db)
         self.radarr = RadarrAPI(
-            logger, 
-            config.radarr.url, 
-            config.radarr.api_key, 
+            logger,
+            config.radarr.url,
+            config.radarr.api_key,
             config.radarr.quality_profile,
-            config.radarr.root_folder, 
-            config.radarr.monitor_added, 
+            config.radarr.root_folder,
+            config.radarr.monitor_added,
             config.radarr.search_added
         )
-        self.processed_movies = self._load_processed_movies()
+        # The timer thread and the API both start syncs; two at once would hand
+        # Radarr the same movie twice
+        self.sync_lock = Lock()
 
-    def _load_processed_movies(self) -> set:
-        """Load previously processed movies from file"""
-        try:
-            if os.path.exists(LetterboxarrSync.PROCESSED_MOVIES_FILEPATH):
-                with open(LetterboxarrSync.PROCESSED_MOVIES_FILEPATH, 'r') as f:
-                    return set(json.load(f))
-        except Exception as e:
-            self.logger.error(f"Error loading processed movies: {e}")
-        return set()
+    @property
+    def processed_movies(self) -> set:
+        """Ids of the movies already handed to Radarr"""
+        return self.db.get_added_ids()
 
-    def _save_processed_movies(self):
-        """Save processed movies to file"""
-        try:
-            if not os.path.exists(LetterboxarrSync.DATA_DIR):
-                os.makedirs(LetterboxarrSync.DATA_DIR)
-
-            with open(LetterboxarrSync.PROCESSED_MOVIES_FILEPATH, 'w') as f:
-                json.dump(list(self.processed_movies), f)
-        except Exception as e:
-            self.logger.error(f"Error saving processed movies: {e}")
+    def mark_processed(self, movie_id: str, slug: Optional[str] = None, title: Optional[str] = None,
+                       year: Optional[int] = None, tags: Optional[List[str]] = None) -> None:
+        """Record a movie as handed to Radarr so later syncs skip it"""
+        self.db.add_movie(movie_id, slug=slug, title=title, year=year, tags=tags)
 
     def sync_once(self):
-        """Perform a single sync operation"""
+        """Perform a single sync operation, recording it as a sync run"""
+        if not self.sync_lock.acquire(blocking=False):
+            self.logger.info("A sync is already running, skipping this one")
+            return
+
+        run_id = self.db.start_sync_run()
+        added = considered = 0
+        error = None
+        try:
+            added, considered = self._sync()
+        except Exception as e:
+            error = str(e)
+            raise
+        finally:
+            self.db.finish_sync_run(run_id, added=added, considered=considered, error=error)
+            self.sync_lock.release()
+
+    def _sync(self) -> Tuple[int, int]:
+        """Run one sync, returning how many movies were added and looked at"""
         self.logger.info("Starting sync operation")
 
         # Get movies from all configured watch lists
@@ -65,16 +74,19 @@ class LetterboxarrSync:
 
         if not movies:
             self.logger.warning("No movies found in any watch lists")
-            return
+            return 0, 0
+
+        # Read the whole set once: the loop below checks it for every movie
+        processed_ids, processed_slugs = self.db.get_added_keys()
 
         # Process each movie
         added_count = 0
         for movie in movies:
             # Create unique identifier
-            movie_id = f"{movie['title']}_{movie.get('year', 'unknown')}"
+            movie_id = movie_key(movie)
 
             # Skip if already processed
-            if movie_id in self.processed_movies:
+            if movie_id in processed_ids or movie['letterboxd_slug'] in processed_slugs:
                 self.logger.debug(f"Skipping already processed: {movie['title']}")
                 continue
 
@@ -94,7 +106,9 @@ class LetterboxarrSync:
             if not radarr_movie:
                 self.logger.warning(f"Could not find in TMDB: {movie['title']}")
                 # Still mark as processed to avoid repeated failed searches
-                self.processed_movies.add(movie_id)
+                self.mark_processed(movie_id, slug=movie['letterboxd_slug'],
+                                    title=movie['title'], year=movie.get('year'))
+                processed_ids.add(movie_id)
                 continue
 
             # Add to Radarr with tags only if auto_add is True
@@ -103,17 +117,17 @@ class LetterboxarrSync:
                 if self.radarr.add_movie(radarr_movie, tags):
                     added_count += 1
                 # Mark as processed
-                self.processed_movies.add(movie_id)
+                self.mark_processed(movie_id, slug=movie['letterboxd_slug'],
+                                    title=movie['title'], year=movie.get('year'), tags=tags)
+                processed_ids.add(movie_id)
             else:
                 self.logger.info(f"Skipping auto-add for: {movie['title']} (auto_add=False)")
 
             # Small delay between additions
             time.sleep(0.5)
 
-        # Save processed movies
-        self._save_processed_movies()
-
         self.logger.info(f"Sync complete. Added {added_count} new movies")
+        return added_count, len(movies)
 
     def run_continuous(self, interval_minutes: int = 60):
         """Run sync continuously at specified interval"""

@@ -130,14 +130,16 @@ class RadarrAPI:
             return False
 
     def get_quality_profiles(self) -> List[Dict]:
-        """Get available quality profiles"""
-        try:
-            response = self.session.get(f"{self.base_url}/api/v3/qualityprofile")
-            response.raise_for_status()
-            return response.json()
-        except requests.RequestException as e:
-            self.logger.error(f"Error fetching quality profiles: {e}")
-            return []
+        """Get available quality profiles
+
+        Unlike the calls the sync makes, this one lets the error through. It
+        backs the configuration screen, where an empty list and an unreachable
+        Radarr have to look different: the second is usually the URL or the API
+        key on that very screen being wrong.
+        """
+        response = self.session.get(f"{self.base_url}/api/v3/qualityprofile", timeout=10)
+        response.raise_for_status()
+        return response.json()
 
     def get_root_folders(self) -> List[Dict]:
         """Get available root folders"""

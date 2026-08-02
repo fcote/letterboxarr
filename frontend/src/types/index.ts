@@ -36,6 +36,47 @@ export interface Config {
   };
 }
 
+export interface QualityProfile {
+  id: number;
+  name: string;
+}
+
+export interface SyncRun {
+  id: number;
+  started_at: number;
+  finished_at: number | null;
+  added: number;
+  considered: number;
+  error: string | null;
+}
+
+export interface SyncStatus {
+  running: boolean;
+  started_at: number | null;
+  last: SyncRun | null;
+}
+
+export interface AddedMovie {
+  movie_id: string;
+  letterboxd_slug: string | null;
+  title: string;
+  year: number | null;
+  tags: string[];
+  added_at: number;
+}
+
+export interface DashboardSummary {
+  watch_items: number;
+  added_to_radarr: number;
+  added_last_week: number;
+  watched: number | null;
+  recently_added: AddedMovie[];
+  sync: {
+    running: boolean;
+    last: SyncRun | null;
+  };
+}
+
 export interface WatchItem {
   id?: number;
   path: string;

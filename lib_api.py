@@ -23,7 +23,7 @@ from lib_letterboxd import (
     CATEGORY_TV_SHOW,
     CATEGORY_UNRELEASED,
 )
-from lib_sync import LetterboxarrSync, LetterboxarrThread
+from lib_sync import LetterboxarrSync, LetterboxarrThread, movie_key
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -304,6 +304,28 @@ async def delete_watch_item(item_id: int, current_user: dict = Depends(context.g
         logger.error(f"Error deleting watch item: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to delete watch item: {str(e)}")
 
+@context.app.get("/api/radarr/quality-profiles")
+def get_radarr_quality_profiles(current_user: dict = Depends(context.get_current_user)):
+    """The quality profiles Radarr offers, to pick from on the configuration screen
+
+    Declared sync: it waits on Radarr, which may be slow or down.
+    """
+    if not context.sync_instance:
+        raise HTTPException(status_code=404, detail="Sync instance not available")
+
+    try:
+        profiles = context.sync_instance.radarr.get_quality_profiles()
+    except Exception as e:
+        logger.error(f"Error fetching quality profiles from Radarr: {e}")
+        raise HTTPException(status_code=502, detail=f"Could not reach Radarr: {e}")
+
+    return {
+        "profiles": [
+            {"id": profile["id"], "name": profile["name"]}
+            for profile in profiles
+        ]
+    }
+
 @context.app.post("/api/test-watch-item")
 def test_letterboxd_url(request: WatchItemCreate, current_user: dict = Depends(context.get_current_user)):
     try:
@@ -347,7 +369,7 @@ def get_categorised_movies(item_id: int) -> List[Dict]:
         global_filters=context.current_config.letterboxd.filters
     )
 
-    processed_movies = context.sync_instance.processed_movies if context.sync_instance else set()
+    processed_ids, processed_slugs = context.sync_instance.db.get_added_keys()
 
     return [
         {
@@ -355,7 +377,7 @@ def get_categorised_movies(item_id: int) -> List[Dict]:
             "year": movie["year"],
             "letterboxd_url": f"https://letterboxd.com/film/{movie['letterboxd_slug']}/",
             "letterboxd_slug": movie["letterboxd_slug"],
-            "processed": f"{movie['title']}_{movie['year']}" in processed_movies,
+            "processed": movie_key(movie) in processed_ids or movie["letterboxd_slug"] in processed_slugs,
             "tmdb_id": movie.get("tmdb_id"),
             "category": movie.get("category", CATEGORY_FILM)
         }
@@ -408,6 +430,29 @@ def get_movies_by_watch_item(item_id: int, current_user: dict = Depends(context.
         logger.error(f"Error getting movies for watch item: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get movies: {str(e)}")
 
+@context.app.post("/api/watch-items/{item_id}/refresh")
+def refresh_watch_item(item_id: int, current_user: dict = Depends(context.get_current_user)):
+    """Drop what is cached for a watch item so the next read re-crawls Letterboxd
+
+    Only the list is dropped. Watched films are shared by every watch item and
+    refresh on their own hourly, so a per-item button does not re-read them.
+    """
+    if not context.current_config or item_id >= len(context.current_config.letterboxd.watch):
+        raise HTTPException(status_code=404, detail="Watch item not found")
+
+    if not context.sync_instance:
+        raise HTTPException(status_code=404, detail="Sync instance not available")
+
+    try:
+        watch_item = context.current_config.letterboxd.watch[item_id]
+        cleared = context.sync_instance.db.clear_crawls(watch_item.path)
+        logger.info(f"Refreshing {watch_item.path}, dropped {cleared} cached crawls")
+        return {"item_id": item_id, "path": watch_item.path, "cleared": cleared}
+
+    except Exception as e:
+        logger.error(f"Error refreshing watch item: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to refresh watch item: {str(e)}")
+
 @context.app.get("/api/watch-items/{item_id}/progress")
 def get_watch_item_progress(item_id: int, current_user: dict = Depends(context.get_current_user)):
     """Per-category count of movies already watched for a watch item
@@ -452,6 +497,11 @@ async def run_sync(background_tasks: BackgroundTasks, current_user: dict = Depen
     if not context.sync_instance:
         raise HTTPException(status_code=404, detail="Sync instance not available")
 
+    # The scheduled sync may already be under way; starting a second one would
+    # just be skipped, so say so rather than reporting a sync that never ran
+    if context.sync_instance.db.get_running_sync_run():
+        raise HTTPException(status_code=409, detail="A sync is already running")
+
     def run_sync_task():
         try:
             context.sync_instance.sync_once()
@@ -460,6 +510,44 @@ async def run_sync(background_tasks: BackgroundTasks, current_user: dict = Depen
 
     background_tasks.add_task(run_sync_task)
     return {"message": "Sync started in background"}
+
+@context.app.get("/api/sync/status")
+async def get_sync_status(current_user: dict = Depends(context.get_current_user)):
+    """Whether a sync is running, and how the last finished one went"""
+    if not context.sync_instance:
+        raise HTTPException(status_code=404, detail="Sync instance not available")
+
+    running = context.sync_instance.db.get_running_sync_run()
+    return {
+        "running": running is not None,
+        "started_at": running["started_at"] if running else None,
+        "last": context.sync_instance.db.get_last_sync_run()
+    }
+
+@context.app.get("/api/dashboard")
+async def get_dashboard(current_user: dict = Depends(context.get_current_user)):
+    """Everything the dashboard shows, in one request
+
+    Reads only what is stored: nothing here crawls Letterboxd or calls Radarr,
+    so opening the dashboard stays instant.
+    """
+    if not context.sync_instance:
+        raise HTTPException(status_code=404, detail="Sync instance not available")
+
+    db = context.sync_instance.db
+    username = context.current_config.letterboxd.username if context.current_config else None
+
+    return {
+        "watch_items": len(context.current_config.letterboxd.watch) if context.current_config else 0,
+        "added_to_radarr": db.count_added(),
+        "added_last_week": db.count_added(since=datetime.now().timestamp() - 7 * 86400),
+        "watched": db.count_watched(username) if username else None,
+        "recently_added": db.get_recently_added(),
+        "sync": {
+            "running": db.get_running_sync_run() is not None,
+            "last": db.get_last_sync_run()
+        }
+    }
 
 @context.app.post("/api/movies/add")
 def add_movie_to_radarr(request: MovieAddRequest, current_user: dict = Depends(context.get_current_user)):
@@ -485,10 +573,14 @@ def add_movie_to_radarr(request: MovieAddRequest, current_user: dict = Depends(c
         # Add to Radarr with tags
         if context.sync_instance.radarr.add_movie(radarr_movie, request.tags):
             # Mark as processed
-            movie_id = f"{request.title}_{request.year}"
-            context.sync_instance.processed_movies.add(movie_id)
-            context.sync_instance._save_processed_movies()
-            
+            context.sync_instance.mark_processed(
+                f"{request.title}_{request.year}",
+                slug=request.letterboxd_slug,
+                title=request.title,
+                year=request.year,
+                tags=request.tags
+            )
+
             return {"message": f"Movie '{request.title}' added to Radarr successfully", "success": True}
         else:
             raise HTTPException(status_code=500, detail="Failed to add movie to Radarr")
