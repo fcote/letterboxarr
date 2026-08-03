@@ -3,7 +3,7 @@ import time
 import json
 import hashlib
 from threading import RLock
-from typing import List, Dict, Optional, Set
+from typing import List, Dict, NamedTuple, Optional, Set, Tuple
 from urllib.parse import urljoin
 
 from curl_cffi import requests
@@ -35,6 +35,16 @@ CATEGORY_SKIP_FILTERS = [
 # /<user>/films/page/2/ while page 1 answers fine), and which ones are refused
 # changes over time, so a refused fingerprint falls through to the next.
 IMPERSONATIONS = ['chrome', 'chrome131', 'safari17_0']
+
+
+class ListPage(NamedTuple):
+    """One page of a Letterboxd listing
+
+    The name is only ever read off the first page, since that is the only one a
+    crawl is sure to fetch and every page of a listing carries the same one.
+    """
+    movies: List[Dict]
+    name: Optional[str] = None
 
 
 class LetterboxdScraper:
@@ -185,7 +195,7 @@ class LetterboxdScraper:
         refused page than an emptied list, and storing it would replace a good
         listing with nothing until the next refresh.
         """
-        movies = self._fetch_path(watch_item, global_filters)
+        movies, name = self._fetch_path(watch_item, global_filters)
 
         if not movies:
             stored = self.db.get_list(list_key)
@@ -196,21 +206,27 @@ class LetterboxdScraper:
                 return stored
             return []
 
-        self.db.save_list(list_key, watch_item.path, movies)
+        self.db.save_list(list_key, watch_item.path, movies, name)
         return movies
 
     def _fetch_path(self, watch_item: WatchListItem,
-                    global_filters: LetterboxdFilters) -> List[Dict]:
-        """Crawl every page of a Letterboxd path, without touching the database"""
+                    global_filters: LetterboxdFilters) -> Tuple[List[Dict], Optional[str]]:
+        """Crawl every page of a Letterboxd path, without touching the database
+
+        Returns the films and the name Letterboxd gives the path, the latter None
+        when the page did not carry one.
+        """
         movies = []
-        for page_movies in self._iter_pages(watch_item, global_filters):
-            movies.extend(page_movies)
+        name = None
+        for page in self._iter_pages(watch_item, global_filters):
+            movies.extend(page.movies)
+            name = name or page.name
 
         self.logger.info(f"Found {len(movies)} movies in {watch_item.path}")
-        return movies
+        return movies, name
 
     def _iter_pages(self, watch_item: WatchListItem, global_filters: LetterboxdFilters):
-        """Yield the films of a Letterboxd path one page at a time
+        """Yield the films of a Letterboxd path one ListPage at a time
 
         Pages are only fetched as the caller asks for them, so a caller that has
         seen enough stops the crawl by walking away from the generator.
@@ -245,10 +261,13 @@ class LetterboxdScraper:
                 self.logger.debug(f"No more movies found on page {page} of {watch_item.path}")
                 return
 
-            yield [
-                movie for movie in (self._extract_movie_data(item) for item in movie_items)
-                if movie
-            ]
+            yield ListPage(
+                movies=[
+                    movie for movie in (self._extract_movie_data(item) for item in movie_items)
+                    if movie
+                ],
+                name=self._extract_list_name(soup) if page == 1 else None
+            )
 
             # Check if there's a next page
             next_page = soup.find('a', class_='next')
@@ -269,13 +288,53 @@ class LetterboxdScraper:
         cannot appear in the listing, so they cost no extra request.
         """
         movies = self.get_movies_from_path(watch_item, global_filters)
+        return self._categorise(
+            movies, watch_item, global_filters,
+            lambda variant: self.get_movies_from_path(variant, global_filters)
+        )
 
+    def get_stored_list(self, watch_item: WatchListItem,
+                        global_filters: LetterboxdFilters) -> Optional[List[Dict]]:
+        """The stored listing of a path, or None if it has never been read
+
+        Unlike get_movies_from_path this never crawls, so a caller with many
+        listings to report on can say "not read yet" for the ones that are
+        missing instead of waiting minutes on Letterboxd for each of them.
+        """
+        return self.db.get_list(self._list_key(watch_item, global_filters))
+
+    def get_stored_movies_by_category(self, watch_item: WatchListItem,
+                                      global_filters: LetterboxdFilters) -> Optional[List[Dict]]:
+        """Categorised movies of a path from storage alone, None if never read
+
+        A variant that has not been read leaves its category unresolved rather
+        than holding the whole listing back: knowing a list's size and how much
+        of it is watched is worth having before every category can be told apart.
+        """
+        movies = self.get_stored_list(watch_item, global_filters)
+        if movies is None:
+            return None
+
+        return self._categorise(
+            movies, watch_item, global_filters,
+            lambda variant: self.get_stored_list(variant, global_filters)
+        )
+
+    def _categorise(self, movies: List[Dict], watch_item: WatchListItem,
+                    global_filters: LetterboxdFilters, listing_of) -> List[Dict]:
+        """Tag each movie with the category its absence from a variant reveals
+
+        A movie missing from the listing read with one category hidden is of that
+        category, and the first match wins since the categories overlap. Whatever
+        listing_of cannot supply is skipped, leaving those movies as plain films.
+        """
         categories = {}
         for category, hidden_item in self._category_variants(watch_item, global_filters):
-            kept_slugs = {
-                movie['letterboxd_slug']
-                for movie in self.get_movies_from_path(hidden_item, global_filters)
-            }
+            listing = listing_of(hidden_item)
+            if listing is None:
+                continue
+
+            kept_slugs = {movie['letterboxd_slug'] for movie in listing}
             for movie in movies:
                 slug = movie['letterboxd_slug']
                 if slug not in kept_slugs:
@@ -364,7 +423,7 @@ class LetterboxdScraper:
         watched_item = WatchListItem(path=f"{username}/films", filters=LetterboxdFilters())
         try:
             with self.crawl_lock:
-                movies = self._fetch_path(watched_item, LetterboxdFilters())
+                movies, _ = self._fetch_path(watched_item, LetterboxdFilters())
         except Exception as e:
             if known is None:
                 raise
@@ -400,10 +459,10 @@ class LetterboxdScraper:
 
         try:
             with self.crawl_lock:
-                for page_movies in self._iter_pages(recent_item, LetterboxdFilters()):
+                for page in self._iter_pages(recent_item, LetterboxdFilters()):
                     pages += 1
                     fresh = [
-                        movie for movie in page_movies
+                        movie for movie in page.movies
                         if movie['letterboxd_slug'] not in seen
                     ]
                     if not fresh:
@@ -453,6 +512,25 @@ class LetterboxdScraper:
         body = soup.find('body')
         if body:
             return int(body.get('data-tmdb-id'))
+        return None
+
+    @staticmethod
+    def _extract_list_name(soup) -> Optional[str]:
+        """What Letterboxd calls the page a listing was read from
+
+        The Open Graph title is what every shape of listing page agrees on: a
+        watchlist gives "<member>'s Watchlist", a list "IMDb Top 250", a crew or
+        cast page "Films directed by James Gray". The heading is only there on
+        the pages built around one, so it stands in when the meta tag is missing.
+        """
+        meta = soup.find('meta', attrs={'property': 'og:title'})
+        heading = soup.find('h1', class_='title-1')
+
+        for name in (meta.get('content') if meta else None,
+                     heading.get_text(' ', strip=True) if heading else None):
+            if name and name.strip():
+                return name.strip()
+
         return None
 
     def _extract_movie_data(self, item) -> Optional[Dict]:

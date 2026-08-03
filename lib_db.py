@@ -39,10 +39,13 @@ CREATE TABLE IF NOT EXISTS films (
 
 -- One row per stored listing: a path read with a given set of filters.
 -- fetched_at is when it was last read from Letterboxd, which is what the
--- refresher schedules on; it is not an expiry.
+-- refresher schedules on; it is not an expiry. name is what Letterboxd calls
+-- the path ("IMDb Top 250", "Films directed by James Gray"), null until a crawl
+-- has managed to read it.
 CREATE TABLE IF NOT EXISTS lists (
     list_key   TEXT PRIMARY KEY,
     path       TEXT NOT NULL,
+    name       TEXT,
     fetched_at REAL NOT NULL
 );
 
@@ -98,10 +101,12 @@ CREATE TABLE IF NOT EXISTS sync_runs (
 
 # Columns added after a database may already have been created, applied on open.
 # Every watched set written before full_refreshed_at existed came from a whole
-# re-read, so the existing timestamp is backfilled into it.
+# re-read, so the existing timestamp is backfilled into it. Listings stored
+# before lists.name existed have none to backfill: the next refresh reads it.
 ADDED_COLUMNS = [
     ('watched_profiles', 'full_refreshed_at', 'REAL',
      "UPDATE watched_profiles SET full_refreshed_at = refreshed_at"),
+    ('lists', 'name', 'TEXT', None),
 ]
 
 # Tables and columns renamed when crawled listings stopped being a cache, applied
@@ -199,15 +204,39 @@ class Database:
 
         return row['oldest'] if row else None
 
-    def save_list(self, list_key: str, path: str, movies: Sequence[Dict]) -> None:
+    def get_path_name(self, path: str) -> Optional[str]:
+        """What Letterboxd calls a watch item, None if no crawl has read a name
+
+        Every filter variant of a path is read off the same Letterboxd page and
+        so carries the same name; the most recently read one answers.
+        """
+        with self.lock:
+            row = self.connection.execute(
+                """SELECT name FROM lists WHERE path = ? AND name IS NOT NULL
+                   ORDER BY fetched_at DESC LIMIT 1""",
+                (path,)
+            ).fetchone()
+
+        return row['name'] if row else None
+
+    def save_list(self, list_key: str, path: str, movies: Sequence[Dict],
+                  name: Optional[str] = None) -> None:
         """Store a listing just read from Letterboxd, replacing the previous one"""
         try:
             with self.lock, self.connection:
+                # A crawl that could not read the name keeps the stored one,
+                # rather than dropping a good name over a page that changed shape
+                if name is None:
+                    stored = self.connection.execute(
+                        "SELECT name FROM lists WHERE list_key = ?", (list_key,)
+                    ).fetchone()
+                    name = stored['name'] if stored else None
+
                 self._upsert_films(movies)
                 self.connection.execute("DELETE FROM lists WHERE list_key = ?", (list_key,))
                 self.connection.execute(
-                    "INSERT INTO lists (list_key, path, fetched_at) VALUES (?, ?, ?)",
-                    (list_key, path, time.time())
+                    "INSERT INTO lists (list_key, path, name, fetched_at) VALUES (?, ?, ?, ?)",
+                    (list_key, path, name, time.time())
                 )
                 self.connection.executemany(
                     "INSERT INTO list_films (list_key, position, slug) VALUES (?, ?, ?)",

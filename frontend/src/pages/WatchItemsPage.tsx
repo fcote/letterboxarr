@@ -4,8 +4,11 @@ import { watchItemsAPI, letterboxdAPI } from '../utils/api';
 import { WatchItem, WatchItemProgress, LetterboxdTestResult } from '../types';
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
-import CategoryProgressBars from '../components/CategoryProgressBars';
+import CategoryRings from '../components/CategoryProgress';
+import TagFilter, { TagOption } from '../components/TagFilter';
+import Tooltip from '../components/Tooltip';
 import { progressCategories } from '../utils/categories';
+import { relativeTime } from '../utils/time';
 import {
   ArrowPathIcon,
   PlusIcon,
@@ -13,17 +16,42 @@ import {
   CheckCircleIcon,
   ExclamationCircleIcon,
   FilmIcon,
+  InformationCircleIcon,
   MagnifyingGlassIcon,
   PencilIcon
 } from '@heroicons/react/24/outline';
 
-// Progress needs a Letterboxd crawl per list, so each one is loaded on its own
+// The stored progress of every list arrives in one request, so they all land
+// together; a single item goes back to 'loading' while it is refreshed on its own
 type ProgressState = WatchItemProgress | 'loading' | 'error';
 
+type SortKey = 'config' | 'path' | 'least-watched' | 'most-watched' | 'largest' | 'stalest';
+
+const SORTS: [SortKey, string][] = [
+  ['config', 'Configured order'],
+  ['path', 'Path (A–Z)'],
+  ['least-watched', 'Least watched'],
+  ['most-watched', 'Most watched'],
+  ['largest', 'Most movies'],
+  ['stalest', 'Least recently read']
+];
+
+type AutoAddFilter = 'all' | 'on' | 'off';
+
+// Whichever way a column is sorted, the lists it says nothing about go last
+const compareWithUnknownLast = (a: number | null, b: number | null, direction: 1 | -1): number => {
+  if (a === null && b === null) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  return (a - b) * direction;
+};
 
 const WatchItemsPage: React.FC = () => {
   const [watchItems, setWatchItems] = useState<WatchItem[]>([]);
   const [search, setSearch] = useState('');
+  const [sort, setSort] = useState<SortKey>('config');
+  const [autoAddFilter, setAutoAddFilter] = useState<AutoAddFilter>('all');
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [progress, setProgress] = useState<Record<number, ProgressState>>({});
   const progressRun = useRef(0);
   const [loading, setLoading] = useState(true);
@@ -53,33 +81,55 @@ const WatchItemsPage: React.FC = () => {
   const [deleting, setDeleting] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState<number | null>(null);
 
-  // A run is abandoned as soon as a newer one starts, so a reload of the whole
-  // list does not get overwritten by crawls left over from the previous one
-  const loadItemProgress = useCallback(async (id: number, run: number) => {
-    if (run !== progressRun.current) return;
-
+  // Refreshing one list re-reads only that one's progress, leaving the rest alone
+  const loadItemProgress = useCallback(async (id: number) => {
     setProgress(previous => ({ ...previous, [id]: 'loading' }));
     try {
       const itemProgress = await watchItemsAPI.getProgress(id);
-      if (run !== progressRun.current) return;
       setProgress(previous => ({ ...previous, [id]: itemProgress }));
     } catch (error: any) {
-      if (run !== progressRun.current) return;
       setProgress(previous => ({ ...previous, [id]: 'error' }));
     }
   }, []);
 
-  // One list at a time: the server crawls Letterboxd and serialises the crawls anyway
+  // Every list in one request. The server answers from the stored listings, so
+  // this no longer waits on Letterboxd, and a run is abandoned as soon as a newer
+  // one starts so a slow answer cannot overwrite a fresher one.
   const loadProgress = useCallback(async (items: WatchItem[]) => {
     progressRun.current += 1;
     const run = progressRun.current;
-    setProgress({});
 
-    for (const item of items) {
-      if (item.id === undefined || run !== progressRun.current) return;
-      await loadItemProgress(item.id, run);
+    const ids = items
+      .map(item => item.id)
+      .filter((id): id is number => id !== undefined);
+    setProgress(Object.fromEntries(ids.map(id => [id, 'loading' as ProgressState])));
+
+    try {
+      const all = await watchItemsAPI.getAllProgress();
+      if (run !== progressRun.current) return;
+      setProgress(Object.fromEntries(all.map(item => [item.item_id, item as ProgressState])));
+    } catch (error: any) {
+      if (run !== progressRun.current) return;
+      setProgress(Object.fromEntries(ids.map(id => [id, 'error' as ProgressState])));
     }
-  }, [loadItemProgress]);
+  }, []);
+
+  // A row's name and last-read date come from the watch items, not from its
+  // progress, so refreshing one has to re-read those too or the row goes on
+  // showing the date it had before. Only the refreshed row is replaced, which
+  // leaves the progress already on screen alone.
+  const reloadItemDetails = useCallback(async (id: number) => {
+    try {
+      const items = await watchItemsAPI.getAll();
+      setWatchItems(previous => previous.map(item => {
+        if (item.id !== id) return item;
+        return items.find(candidate => candidate.id === id) ?? item;
+      }));
+    } catch (error: any) {
+      // The refresh itself worked; an out-of-date line on the row is not worth
+      // interrupting anyone over
+    }
+  }, []);
 
   const loadWatchItems = useCallback(async () => {
     try {
@@ -97,6 +147,39 @@ const WatchItemsPage: React.FC = () => {
     loadWatchItems();
   }, [loadWatchItems]);
 
+  // The progress of a list once it is in, or null while it is loading or failed
+  const progressOf = (item: WatchItem): WatchItemProgress | null => {
+    const state = item.id === undefined ? undefined : progress[item.id];
+    return state && state !== 'loading' && state !== 'error' ? state : null;
+  };
+
+  // How much of a list is watched, null when that is not known: not read yet, no
+  // Letterboxd profile configured, or nothing in the list to watch
+  const watchedShare = (item: WatchItem): number | null => {
+    const state = progressOf(item);
+    if (!state || !state.read || state.watched === null || state.total === 0) {
+      return null;
+    }
+    return state.watched / state.total;
+  };
+
+  // What a row cannot show on one line: the Letterboxd name, whether it auto-adds,
+  // its tags, and when it was last read. Searching matches the name and the tags
+  // and one sort goes by the read date, so all of them belong here to explain a row
+  // that matched or ordered on something not on screen.
+  const itemSummary = (item: WatchItem): string[] => [
+    `letterboxd.com/${item.path}`,
+    item.name ?? '',
+    item.auto_add === false
+      ? 'Auto-add off — movies are tracked but not sent to Radarr'
+      : 'Auto-add on — new movies go to Radarr',
+    item.tags && item.tags.length > 0 ? `Tags: ${item.tags.join(', ')}` : 'No tags',
+    item.last_refreshed != null
+      ? `Read from Letterboxd ${relativeTime(item.last_refreshed)}`
+      : 'Never read from Letterboxd'
+  ];
+
+  // Carries no outer spacing of its own: the row sits it on its one line
   const renderProgress = (item: WatchItem) => {
     const state = item.id === undefined ? undefined : progress[item.id];
 
@@ -104,43 +187,87 @@ const WatchItemsPage: React.FC = () => {
       return null;
     }
 
+    // Terse on the row, with the whole of it on the hover, since a row is one
+    // line and a sentence in the middle of it would push the buttons off the end
+    const note = (text: string, explanation: string, className = 'text-dark-text-muted') => (
+      <Tooltip lines={[text, explanation]} focusable={false} className="inline-flex">
+        <span className={`whitespace-nowrap ${className}`}>{text}</span>
+      </Tooltip>
+    );
+
     if (state === 'loading') {
       return (
-        <div className="mt-3 flex items-center text-xs text-dark-text-muted">
+        <span className="flex items-center whitespace-nowrap text-dark-text-muted">
           <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-dark-text-muted mr-2"></div>
-          Reading this list from Letterboxd...
-        </div>
+          Reading
+        </span>
       );
     }
 
     if (state === 'error') {
-      return (
-        <p className="mt-3 text-xs text-brand-orange">Could not read this list from Letterboxd.</p>
-      );
+      return note('Progress unavailable', "Could not read this list's progress.",
+                  'text-brand-orange');
+    }
+
+    if (!state.read) {
+      return note('Not read yet',
+                  'This list has not been read from Letterboxd yet. It is read in the '
+                  + 'background, or refresh it now.');
     }
 
     if (state.total === 0) {
-      return <p className="mt-3 text-xs text-dark-text-muted">No movies found in this list.</p>;
+      return note('No movies', 'No movies were found in this list.');
     }
 
     if (state.watched === null) {
-      return (
-        <p className="mt-3 text-xs text-dark-text-muted">
-          Set your Letterboxd username in Configuration to see how much of this list you have watched.
-        </p>
-      );
+      return note(`${state.total} movies`,
+                  'Set your Letterboxd username in Configuration to see how much of this '
+                  + 'list you have watched.');
     }
 
     const categories = progressCategories(state.categories);
 
     if (categories.length === 0) {
-      return (
-        <p className="mt-3 text-xs text-dark-text-muted">Everything in this list is still unreleased.</p>
-      );
+      return note(`${state.total} unreleased`,
+                  'Everything in this list is still unreleased, so none of it can have '
+                  + 'been watched.');
     }
 
-    return <CategoryProgressBars categories={categories} className="mt-3 max-w-4xl" />;
+    return (
+      <span className="flex items-center gap-2">
+        <CategoryRings categories={categories} />
+        <span className="text-dark-text-muted whitespace-nowrap">
+          {state.watched}/{state.total} watched
+        </span>
+      </span>
+    );
   };
+
+  const clearFilters = () => {
+    setSearch('');
+    setAutoAddFilter('all');
+    setSelectedTags([]);
+  };
+
+  // Only tags on more than one list are worth filtering by: a tag used once picks
+  // out the single list that carries it, which searching already does. Counted over
+  // every watch item rather than the visible ones, so the choices do not shift
+  // about as the filters change.
+  const tagOptions = ((): TagOption[] => {
+    const counts = new Map<string, number>();
+    for (const item of watchItems) {
+      for (const tag of item.tags ?? []) {
+        counts.set(tag, (counts.get(tag) ?? 0) + 1);
+      }
+    }
+
+    // Array.from rather than a spread: the build targets a version that cannot
+    // iterate a Map directly
+    return Array.from(counts.entries())
+      .filter(([, count]) => count > 1)
+      .map(([tag, count]) => ({ tag, count }))
+      .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+  })();
 
   const handleAddTags = () => {
     if (tagInput.trim()) {
@@ -253,9 +380,9 @@ const WatchItemsPage: React.FC = () => {
 
     setRefreshing(item.id);
     try {
-      // Answers once the list is stored, so the progress reloads off the new one
+      // Answers once the list is stored, so both of these read off the new one
       await watchItemsAPI.refresh(item.id);
-      await loadItemProgress(item.id, progressRun.current);
+      await Promise.all([loadItemProgress(item.id), reloadItemDetails(item.id)]);
       toast.success(`letterboxd.com/${item.path} re-read from Letterboxd`);
     } catch (error: any) {
       toast.error(error.response?.data?.detail || 'Failed to refresh this watch item');
@@ -290,12 +417,55 @@ const WatchItemsPage: React.FC = () => {
   }
 
   const query = search.trim().toLowerCase();
-  const visibleItems = query
-    ? watchItems.filter(item =>
-        item.path.toLowerCase().includes(query) ||
-        (item.tags ?? []).some(tag => tag.toLowerCase().includes(query))
-      )
-    : watchItems;
+  const filtersActive = query !== '' || autoAddFilter !== 'all' || selectedTags.length > 0;
+
+  // The Letterboxd name is searchable as well as the path, so a list whose path
+  // is an opaque slug can still be found by what it is called
+  const matchesSearch = (item: WatchItem) =>
+    !query ||
+    item.path.toLowerCase().includes(query) ||
+    (item.name ?? '').toLowerCase().includes(query) ||
+    (item.tags ?? []).some(tag => tag.toLowerCase().includes(query));
+
+  const matchesFilters = (item: WatchItem) => {
+    const autoAdd = item.auto_add !== false;
+    if (autoAddFilter === 'on' && !autoAdd) return false;
+    if (autoAddFilter === 'off' && autoAdd) return false;
+
+    // Any one of the picked tags is enough, so picking more widens the result
+    if (selectedTags.length > 0) {
+      const tags = item.tags ?? [];
+      if (!selectedTags.some(tag => tags.includes(tag))) return false;
+    }
+
+    return true;
+  };
+
+  const sortItems = (items: WatchItem[]): WatchItem[] => {
+    const sorted = [...items];
+
+    switch (sort) {
+      case 'path':
+        return sorted.sort((a, b) => a.path.localeCompare(b.path));
+      case 'least-watched':
+        return sorted.sort((a, b) => compareWithUnknownLast(watchedShare(a), watchedShare(b), 1));
+      case 'most-watched':
+        return sorted.sort((a, b) => compareWithUnknownLast(watchedShare(a), watchedShare(b), -1));
+      case 'largest':
+        return sorted.sort((a, b) => compareWithUnknownLast(
+          progressOf(a)?.total ?? null, progressOf(b)?.total ?? null, -1
+        ));
+      case 'stalest':
+        // Never read is as out of date as a list gets, so those lead
+        return sorted.sort((a, b) => (a.last_refreshed ?? 0) - (b.last_refreshed ?? 0));
+      default:
+        return sorted;
+    }
+  };
+
+  const visibleItems = sortItems(
+    watchItems.filter(item => matchesSearch(item) && matchesFilters(item))
+  );
 
   return (
     <Layout>
@@ -619,30 +789,80 @@ const WatchItemsPage: React.FC = () => {
           </div>
         )}
 
-        {/* Search */}
+        {/* Search, sort and filters on one row, kept in reach while scrolling */}
         {watchItems.length > 0 && (
-          <div className="mt-6 flex items-center gap-3">
-            <div className="relative flex-1 max-w-md">
-              <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-dark-text-muted" />
+          <div className="sticky top-0 z-10 mt-6 flex flex-wrap items-center gap-2 bg-dark-bg-primary py-3">
+            <div className="relative min-w-64 max-w-sm flex-1">
+              <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-dark-text-muted" />
               <input
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="input-field w-full pl-9"
-                placeholder="Search by name or tag"
-                aria-label="Search watch items by name or tag"
+                className="input-field h-9 w-full py-0 pl-9 text-sm"
+                placeholder="Search by path, name or tag"
+                aria-label="Search watch items by path, name or tag"
               />
             </div>
-            {query && (
-              <button type="button" onClick={() => setSearch('')} className="btn-secondary text-sm">
+
+            {/* Hidden when no tag is on more than one list: there would be
+                nothing in it to pick */}
+            {tagOptions.length > 0 && (
+              <TagFilter
+                options={tagOptions}
+                selected={selectedTags}
+                onChange={setSelectedTags}
+              />
+            )}
+
+            <div className="flex h-9 items-stretch overflow-hidden rounded-md border border-dark-border">
+              {([['all', 'All'], ['on', 'Auto-add on'], ['off', 'Auto-add off']] as [AutoAddFilter, string][])
+                .map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setAutoAddFilter(value)}
+                    aria-pressed={autoAddFilter === value}
+                    className={`whitespace-nowrap px-3 text-xs font-medium ${
+                      autoAddFilter === value
+                        ? 'bg-brand-blue/20 text-brand-blue'
+                        : 'text-dark-text-muted hover:bg-dark-bg-tertiary'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+            </div>
+
+            {filtersActive && (
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="h-9 whitespace-nowrap rounded-md px-3 text-xs font-medium text-dark-text-muted hover:bg-dark-bg-tertiary hover:text-dark-text-secondary"
+              >
                 Clear
               </button>
             )}
-            {query && (
-              <span className="text-sm text-dark-text-muted">
-                {visibleItems.length} of {watchItems.length}
-              </span>
-            )}
+
+            {/* Filters on the left, what came back and how it is ordered on the right */}
+            <span className="ml-auto whitespace-nowrap text-xs text-dark-text-muted">
+              {visibleItems.length === watchItems.length
+                ? `${watchItems.length} list${watchItems.length === 1 ? '' : 's'}`
+                : `${visibleItems.length} of ${watchItems.length}`}
+            </span>
+
+            <label className="ml-2 flex items-center gap-2 whitespace-nowrap text-xs text-dark-text-muted">
+              Sort
+              <select
+                value={sort}
+                onChange={(e) => setSort(e.target.value as SortKey)}
+                className="input-field h-9 py-0 text-sm"
+                aria-label="Sort watch items"
+              >
+                {SORTS.map(([key, label]) => (
+                  <option key={key} value={key}>{label}</option>
+                ))}
+              </select>
+            </label>
           </div>
         )}
 
@@ -661,52 +881,54 @@ const WatchItemsPage: React.FC = () => {
               <MagnifyingGlassIcon className="mx-auto h-12 w-12 text-dark-text-muted" />
               <h3 className="mt-2 text-sm font-medium text-dark-text-primary">No matching watch items</h3>
               <p className="mt-1 text-sm text-dark-text-muted">
-                No list name or tag matches "{search.trim()}".
+                {query
+                  ? `No path, name or tag matches "${search.trim()}".`
+                  : 'None of your lists match the filters you have set.'}
               </p>
+              <button type="button" onClick={clearFilters} className="btn-secondary text-sm mt-4">
+                Clear filters
+              </button>
             </div>
           ) : (
             <div className="card overflow-hidden">
               <ul className="divide-y divide-dark-border">
                 {visibleItems.map((item) => (
-                  <li key={item.id} className="px-6 py-4">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-start">
-                          <FilmIcon className="h-5 w-5 text-dark-text-muted mr-3 mt-0.5" />
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm font-medium text-dark-text-primary truncate">
-                              letterboxd.com/{item.path}
-                            </p>
-                            <div className="mt-1 flex items-center gap-2">
-                              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                                item.auto_add !== false ? 'bg-brand-green/20 text-brand-green border border-brand-green/30' : 'bg-dark-bg-tertiary text-dark-text-muted border border-dark-border'
-                              }`}>
-                                {item.auto_add !== false ? 'Auto-add enabled' : 'Auto-add disabled'}
-                              </span>
-                              {item.tags && item.tags.length > 0 && item.tags.map((tag, index) => (
-                                <span
-                                  key={index}
-                                  className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-brand-blue/20 text-brand-blue border border-brand-blue/30"
-                                >
-                                  {tag}
-                                </span>
-                              ))}
-                            </div>
-                            {renderProgress(item)}
-                          </div>
-                        </div>
+                  <li key={item.id} className="px-4 py-2">
+                    {/* One line per list: the path takes what room is left, and
+                        everything that is not needed at a glance is on the hover
+                        summary rather than on a line of its own */}
+                    <div className="flex items-center gap-4">
+                      <div className="flex min-w-0 flex-1 items-center gap-2">
+                        {/* The summary hangs off this one icon rather than the whole
+                            row, so passing over a path does not raise a bubble.
+                            An information mark rather than a film strip: it is here
+                            to be hovered, and the film strip already means "Films"
+                            on the category rings to the right. */}
+                        <Tooltip
+                          lines={itemSummary(item)}
+                          className="inline-flex flex-shrink-0 rounded p-1 text-dark-text-muted hover:text-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue"
+                        >
+                          <InformationCircleIcon className="h-4 w-4" />
+                        </Tooltip>
+                        <p className="truncate text-sm font-medium text-dark-text-primary">
+                          letterboxd.com/{item.path}
+                        </p>
                       </div>
-                      <div className="flex items-center space-x-2 ml-4">
+                      <div className="flex flex-shrink-0 items-center gap-3 text-xs">
+                        {renderProgress(item)}
+                      </div>
+                      <div className="flex flex-shrink-0 items-center space-x-2">
                         <Link
                           to={`/movies/${item.id}`}
                           className="text-brand-blue hover:text-brand-blue/80 text-sm font-medium"
                         >
                           View Movies
                         </Link>
+                        {/* No tooltips on these: aria-label still names each one
+                            for anything not reading the picture */}
                         <button
                           onClick={() => handleEditClick(item)}
                           className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-dark-text-muted hover:bg-dark-bg-tertiary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-blue"
-                          title="Edit this watch item"
                           aria-label={`Edit letterboxd.com/${item.path}`}
                         >
                           <PencilIcon className="h-4 w-4" />
@@ -715,7 +937,6 @@ const WatchItemsPage: React.FC = () => {
                           onClick={() => handleRefresh(item)}
                           disabled={refreshing === item.id}
                           className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-dark-text-muted hover:bg-dark-bg-tertiary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-blue disabled:opacity-50 disabled:cursor-not-allowed"
-                          title="Read this list from Letterboxd again, ahead of its next scheduled refresh"
                           aria-label={`Refresh letterboxd.com/${item.path}`}
                         >
                           <ArrowPathIcon className={`h-4 w-4 ${refreshing === item.id ? 'animate-spin' : ''}`} />
@@ -724,6 +945,7 @@ const WatchItemsPage: React.FC = () => {
                           onClick={() => handleDelete(item.id!)}
                           disabled={deleting === item.id}
                           className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-red-500 hover:bg-brand-orange/10 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-orange disabled:opacity-50 disabled:cursor-not-allowed"
+                          aria-label={`Delete letterboxd.com/${item.path}`}
                         >
                           {deleting === item.id ? (
                             <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-500"></div>

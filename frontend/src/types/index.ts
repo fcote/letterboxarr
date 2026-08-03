@@ -82,6 +82,11 @@ export interface DashboardSummary {
 export interface WatchItem {
   id?: number;
   path: string;
+  // What Letterboxd calls the list, null until a crawl has read it. Read-only:
+  // it comes from the stored listing, not from anything the form sends back.
+  name?: string | null;
+  // When this list was last read from Letterboxd, null if it never has been
+  last_refreshed?: number | null;
   tags: string[];
   auto_add?: boolean;
   filters?: {
@@ -109,6 +114,8 @@ export interface Movie {
 export interface WatchItemMovies {
   watch_item: {
     path: string;
+    // What Letterboxd calls the list, null until a crawl has read it
+    name?: string | null;
     tags: string[];
   };
   movies: Movie[];
@@ -128,6 +135,9 @@ export interface CategoryProgress {
 
 export interface WatchItemProgress {
   item_id: number;
+  // False until the list has been read from Letterboxd at least once, in which
+  // case every count is zero and there is nothing to report yet
+  read: boolean;
   total: number;
   watched: number | null;
   categories: CategoryProgress[];

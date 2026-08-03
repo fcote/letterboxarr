@@ -4,7 +4,7 @@ import { moviesAPI, watchItemsAPI } from '../utils/api';
 import { WatchItemMovies, Movie } from '../types';
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
-import { ProgressTrack } from '../components/CategoryProgressBars';
+import { ProgressTrack } from '../components/CategoryProgress';
 import { MOVIE_CATEGORIES } from '../utils/categories';
 import { relativeTime } from '../utils/time';
 import {
@@ -16,6 +16,8 @@ import {
   FilmIcon,
   PlusIcon
 } from '@heroicons/react/24/outline';
+
+const APP_TITLE = 'Letterboxarr';
 
 const MoviesPage: React.FC = () => {
   const { itemId } = useParams<{ itemId: string }>();
@@ -29,6 +31,18 @@ const MoviesPage: React.FC = () => {
       loadMovies(parseInt(itemId));
     }
   }, [itemId]);
+
+  // Name the list in the tab and in the history entry by its Letterboxd path,
+  // which is how the watch items page labels it too. The plain app name goes back
+  // on the way out so another page is not left under this list's title.
+  const watchItemPath = movieData?.watch_item.path;
+
+  useEffect(() => {
+    document.title = watchItemPath ? `${watchItemPath} · ${APP_TITLE}` : APP_TITLE;
+    return () => {
+      document.title = APP_TITLE;
+    };
+  }, [watchItemPath]);
 
   const loadMovies = async (id: number) => {
     try {

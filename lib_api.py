@@ -213,15 +213,23 @@ async def update_config(config_update: Config, current_user: dict = Depends(cont
         logger.error(f"Error updating configuration: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to update configuration: {str(e)}")
 
+# Declared sync: it reads the stored name and refresh date of every watch item,
+# which on a long watch list is a lot of small queries to run on the event loop.
 @context.app.get("/api/watch-items")
-async def get_watch_items(current_user: dict = Depends(context.get_current_user)):
+def get_watch_items(current_user: dict = Depends(context.get_current_user)):
     if not context.current_config:
         raise HTTPException(status_code=404, detail="Configuration not found")
+
+    db = context.sync_instance.db if context.sync_instance else None
 
     return [
         {
             "id": i,
-            **item.to_dict()
+            **item.to_dict(),
+            # What Letterboxd calls the list and when it was last read: the watch
+            # items page searches on the one and sorts on the other
+            "name": db.get_path_name(item.path) if db else None,
+            "last_refreshed": db.get_path_fetched_at(item.path) if db else None,
         }
         for i, item in enumerate(context.current_config.letterboxd.watch)
     ]
@@ -391,6 +399,54 @@ def get_categorised_movies(item_id: int) -> List[Dict]:
     ]
 
 
+def get_stored_categorised_movies(item_id: int) -> Optional[List[Dict]]:
+    """Categorised movies of a watch item from storage, None if never read
+
+    Never crawls, and unlike get_categorised_movies does not look up what Radarr
+    already has: progress only needs each movie's slug and category, and reading
+    the whole added-movies table once per watch item is a lot of nothing.
+    """
+    watch_item = context.current_config.letterboxd.watch[item_id]
+    return context.sync_instance.letterboxd.get_stored_movies_by_category(
+        watch_item=watch_item,
+        global_filters=context.current_config.letterboxd.filters
+    )
+
+
+def watch_item_progress(item_id: int, movies: Optional[List[Dict]],
+                        watched_slugs: Optional[set]) -> Dict:
+    """Per-category count of movies already watched for one watch item
+
+    read is False when the listing has never been read from Letterboxd; the
+    counts are all zero in that case and the page says so rather than reporting
+    an empty list. watched counts are None when no Letterboxd profile is
+    configured, since watched status is what the profile provides.
+    """
+    listing = movies if movies is not None else []
+
+    def watched_in(selection: List[Dict]) -> Optional[int]:
+        if watched_slugs is None:
+            return None
+        return sum(1 for movie in selection if movie["letterboxd_slug"] in watched_slugs)
+
+    categories = []
+    for category in MOVIE_CATEGORIES:
+        in_category = [movie for movie in listing if movie["category"] == category]
+        categories.append({
+            "category": category,
+            "total": len(in_category),
+            "watched": watched_in(in_category)
+        })
+
+    return {
+        "item_id": item_id,
+        "read": movies is not None,
+        "total": len(listing),
+        "watched": watched_in(listing),
+        "categories": categories
+    }
+
+
 def get_watched_slugs() -> Optional[set]:
     """Slugs already watched on the configured Letterboxd profile, None if unset"""
     username = context.current_config.letterboxd.username
@@ -424,6 +480,8 @@ def get_movies_by_watch_item(item_id: int, current_user: dict = Depends(context.
         return {
             "watch_item": {
                 "path": watch_item.path,
+                # What Letterboxd calls the list, null until a crawl has read it
+                "name": context.sync_instance.db.get_path_name(watch_item.path),
                 "tags": watch_item.tags
             },
             "movies": movies,
@@ -462,40 +520,49 @@ def refresh_watch_item(item_id: int, current_user: dict = Depends(context.get_cu
         logger.error(f"Error refreshing watch item: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to refresh watch item: {str(e)}")
 
+# Progress is reported from the stored listings alone, so neither of the two
+# endpoints below ever crawls. The watch items page asks for every list it shows
+# at once, and a request that stopped to read one of them from Letterboxd would
+# hold up all the others behind it for as long as that crawl took.
+@context.app.get("/api/watch-items/progress")
+def get_all_watch_item_progress(current_user: dict = Depends(context.get_current_user)):
+    """Progress of every watch item, in one answer
+
+    The page sorts and filters on the whole set, so it needs all of them anyway,
+    and one request is much less work than one per item: the watched profile is
+    read once here rather than once for every list.
+    """
+    if not context.current_config:
+        raise HTTPException(status_code=404, detail="Configuration not found")
+
+    try:
+        watched_slugs = get_watched_slugs()
+        return {
+            "items": [
+                watch_item_progress(item_id, get_stored_categorised_movies(item_id), watched_slugs)
+                for item_id in range(len(context.current_config.letterboxd.watch))
+            ]
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting progress for the watch items: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get progress: {str(e)}")
+
+
 @context.app.get("/api/watch-items/{item_id}/progress")
 def get_watch_item_progress(item_id: int, current_user: dict = Depends(context.get_current_user)):
-    """Per-category count of movies already watched for a watch item
+    """Per-category count of movies already watched for one watch item
 
-    Counts are None when no Letterboxd profile is configured, since watched
-    status is what the profile provides.
+    Answers the page after that item has been refreshed on its own, which is why
+    it is worth having next to the endpoint that reports on all of them.
     """
     if not context.current_config or item_id >= len(context.current_config.letterboxd.watch):
         raise HTTPException(status_code=404, detail="Watch item not found")
 
     try:
-        movies = get_categorised_movies(item_id)
-        watched_slugs = get_watched_slugs()
-
-        def watched_in(selection: List[Dict]) -> Optional[int]:
-            if watched_slugs is None:
-                return None
-            return sum(1 for movie in selection if movie["letterboxd_slug"] in watched_slugs)
-
-        categories = []
-        for category in MOVIE_CATEGORIES:
-            in_category = [movie for movie in movies if movie["category"] == category]
-            categories.append({
-                "category": category,
-                "total": len(in_category),
-                "watched": watched_in(in_category)
-            })
-
-        return {
-            "item_id": item_id,
-            "total": len(movies),
-            "watched": watched_in(movies),
-            "categories": categories
-        }
+        return watch_item_progress(
+            item_id, get_stored_categorised_movies(item_id), get_watched_slugs()
+        )
 
     except Exception as e:
         logger.error(f"Error getting progress for watch item: {e}")

@@ -65,6 +65,12 @@ export const watchItemsAPI = {
     const response: AxiosResponse<WatchItemProgress> = await api.get(`/watch-items/${id}/progress`);
     return response.data;
   },
+  // Every list in one request: the page needs the whole set to sort and filter on
+  getAllProgress: async (): Promise<WatchItemProgress[]> => {
+    const response: AxiosResponse<{ items: WatchItemProgress[] }> =
+      await api.get('/watch-items/progress');
+    return response.data.items;
+  },
   refresh: async (id: number): Promise<{ item_id: number; path: string; refreshed: number }> => {
     const response = await api.post(`/watch-items/${id}/refresh`);
     return response.data;
