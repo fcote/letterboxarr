@@ -54,7 +54,12 @@ class LetterboxarrSync:
         last read. Failing to read them is not failing the sync: the stored
         lists may still hold movies the last round did not get to.
 
-        The run is recorded around both halves, which is what makes "a sync is
+        The release dates of the films still waiting to come out are read last,
+        after Radarr has been handed everything: they are a page per film, and a
+        film reaching Radarr today is worth more than a date being one round
+        older than it had to be.
+
+        The run is recorded around all of it, which is what makes "a sync is
         in progress" mean the whole round to everything watching it.
         """
         if not self.sync_lock.acquire(blocking=False):
@@ -71,6 +76,11 @@ class LetterboxarrSync:
                 except Exception as e:
                     self.logger.error(f"Error refreshing the watch lists: {e}")
             added, considered = self._sync()
+            if refresh:
+                try:
+                    self.refresher.refresh_releases()
+                except Exception as e:
+                    self.logger.error(f"Error refreshing the release dates: {e}")
         except Exception as e:
             error = str(e)
             raise

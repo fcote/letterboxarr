@@ -74,6 +74,26 @@ CREATE TABLE IF NOT EXISTS watched_films (
     PRIMARY KEY (username, slug)
 );
 
+-- The release dates read off a film's page on Letterboxd. One row per country
+-- and release type, since a film opens on different days in different places
+-- and a country can have a theatrical date and a digital one. Dates are ISO
+-- strings so they sort and compare as text.
+CREATE TABLE IF NOT EXISTS film_releases (
+    slug    TEXT NOT NULL REFERENCES films(slug) ON DELETE CASCADE,
+    country TEXT NOT NULL,
+    type    TEXT NOT NULL,
+    date    TEXT NOT NULL,
+    PRIMARY KEY (slug, country, type, date)
+);
+
+-- When a film's release table was last read, kept apart from the dates
+-- themselves: a film read and found to have no announced date at all still
+-- counts as read, and would otherwise be read again on every round.
+CREATE TABLE IF NOT EXISTS film_release_reads (
+    slug    TEXT PRIMARY KEY REFERENCES films(slug) ON DELETE CASCADE,
+    read_at REAL NOT NULL
+);
+
 -- Movies handed to Radarr. movie_id is the historical "<title>_<year>" key;
 -- slug is null for rows imported from processed_movies.json.
 CREATE TABLE IF NOT EXISTS added_movies (
@@ -367,6 +387,65 @@ class Database:
                 )
         except sqlite3.Error as e:
             self.logger.warning(f"Error adding watched films for {username}: {e}")
+
+    # -- Release dates ----------------------------------------------------
+
+    def get_film_releases(self) -> Dict[str, List[Dict]]:
+        """Every stored release date, grouped by film slug
+
+        Read whole rather than a film at a time: only the films the upcoming
+        page is about are ever read from Letterboxd, so this is a few hundred
+        rows, and the page needs all of a film's dates at once to tell the one
+        in the configured country from the earliest one anywhere.
+        """
+        with self.lock:
+            rows = self.connection.execute(
+                "SELECT slug, country, type, date FROM film_releases ORDER BY date"
+            ).fetchall()
+
+        releases: Dict[str, List[Dict]] = {}
+        for row in rows:
+            releases.setdefault(row['slug'], []).append({
+                'country': row['country'],
+                'type': row['type'],
+                'date': row['date']
+            })
+        return releases
+
+    def get_release_reads(self) -> Dict[str, float]:
+        """When each film's release table was last read, by slug"""
+        with self.lock:
+            rows = self.connection.execute(
+                "SELECT slug, read_at FROM film_release_reads"
+            ).fetchall()
+
+        return {row['slug']: row['read_at'] for row in rows}
+
+    def save_film_releases(self, movie: Dict, releases: Sequence[Dict]) -> None:
+        """Store the release dates just read for a film, replacing the previous ones
+
+        Called with no releases when the film's page announced none, which still
+        counts as read: a film with nothing scheduled is exactly what the page
+        has to remember so as not to ask again on the next round.
+        """
+        slug = movie['letterboxd_slug']
+        try:
+            with self.lock, self.connection:
+                self._upsert_films([movie])
+                self.connection.execute("DELETE FROM film_releases WHERE slug = ?", (slug,))
+                self.connection.executemany(
+                    """INSERT OR IGNORE INTO film_releases (slug, country, type, date)
+                       VALUES (?, ?, ?, ?)""",
+                    [(slug, release['country'], release['type'], release['date'])
+                     for release in releases]
+                )
+                self.connection.execute(
+                    """INSERT INTO film_release_reads (slug, read_at) VALUES (?, ?)
+                       ON CONFLICT(slug) DO UPDATE SET read_at = excluded.read_at""",
+                    (slug, time.time())
+                )
+        except sqlite3.Error as e:
+            self.logger.warning(f"Error storing the release dates of {slug}: {e}")
 
     # -- Added movies -----------------------------------------------------
 

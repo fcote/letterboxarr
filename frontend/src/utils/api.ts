@@ -1,5 +1,5 @@
 import axios, { AxiosResponse } from 'axios';
-import { Config, DashboardSummary, LoginCredentials, QualityProfile, SyncStatus, Token, WatchItem, WatchItemMovies, WatchItemProgress, LetterboxdTestResult } from '../types';
+import { Config, DashboardSummary, LoginCredentials, QualityProfile, SyncStatus, Token, UpcomingRefreshResult, UpcomingReleases, WatchItem, WatchItemMovies, WatchItemProgress, LetterboxdTestResult } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -88,6 +88,19 @@ export const moviesAPI = {
   },
   addToRadarr: async (movie: { title: string; year: number; letterboxd_slug: string; tags: string[] }): Promise<{ message: string; success: boolean }> => {
     const response = await api.post('/movies/add', movie);
+    return response.data;
+  },
+};
+
+export const upcomingAPI = {
+  get: async (): Promise<UpcomingReleases> => {
+    const response: AxiosResponse<UpcomingReleases> = await api.get('/upcoming');
+    return response.data;
+  },
+  // Reads a Letterboxd page per recent film, so this answers in minutes on a
+  // large watch list rather than at once
+  refresh: async (): Promise<UpcomingRefreshResult> => {
+    const response: AxiosResponse<UpcomingRefreshResult> = await api.post('/upcoming/refresh');
     return response.data;
   },
 };

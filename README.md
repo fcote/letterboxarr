@@ -22,6 +22,7 @@ Automatically sync your Letterboxd lists to your Radarr instance. This script pe
 - ⚡ Configurable sync interval and filters
 - 🎭 Per-list filtering (skip documentaries, short films, etc.)
 - 🗂️ Movies view split into films, short films, documentaries and TV shows
+- 📅 Upcoming tab listing what your lists are still waiting on, by release date in your country
 - 👁️ Flags the films you have already watched on your Letterboxd profile
 - 📊 Per-category watched progress on each watch item
 - 🔄 Per-list refresh button to re-read a list from Letterboxd ahead of its next scheduled refresh
@@ -142,6 +143,16 @@ python main.py
 
 Movies from each list can be automatically tagged in Radarr. Filters can be applied globally or per-list to skip certain types of content.
 
+### Upcoming Releases
+
+The **Upcoming** tab lists the films your watch lists are still waiting on, soonest first, with the release type and a button to hand one to Radarr ahead of time so it is monitored and grabbed the day it lands.
+
+Set `letterboxd.country` — on the configuration page or in `config.yml` — to be told when a film comes out where you are. Each film is dated by its soonest release still to come in that country. A film with **no** date announced there at all is dated by the soonest release anywhere instead, and the row says which country that was rather than pretending the date is local; a film whose dates there have all passed is out where you are, so it drops off the page rather than being dated by a release on the other side of the world.
+
+Only dates still ahead are considered, so a film that has already opened stays on the page for its digital, physical or later local release rather than disappearing the day it premiered somewhere. Films with nothing ahead are counted on the page rather than listed.
+
+Only films from the current year onwards are considered. Finding them costs one or two pages per list rather than all of them: each list is read again sorted by release date, newest first, and the crawl stops as soon as it is past the current year. Each of those films then has its release table read from its own Letterboxd page, at most 100 per round and no more often than twice a day, so a long watch list fills in over a few rounds rather than in one long crawl. A film first released in an earlier year is not looked at, so a late local or home-media date for one of those will not appear.
+
 ### Authentication
 
 The web interface is protected by authentication. Default credentials:
@@ -156,7 +167,8 @@ Everything is kept in a single SQLite database, `letterboxarr.db`, in the `/app/
 
 - **Added movies** — the movies already handed to Radarr, so they are not added twice and failed lookups are not retried on every sync.
 - **Watched films** — the films marked as watched on the configured Letterboxd profile. Refreshed on the sync interval, but only topped up: `/films/by/date/` lists films newest-logged first, so the refresh reads pages until one holds nothing new and stops, which is a single page when nothing has been watched since the last check. Adding films is all a top-up can do, so the profile is also re-read in full once a day to pick up anything no longer watched.
-- **Crawled listings** — each list, with the filters it was read with. Resolving categories reads a list several times, so a single watch item is five listings.
+- **Crawled listings** — each list, with the filters it was read with and the order it was read in. Resolving categories reads a list several times, and the Upcoming tab reads the head of it once more sorted by release date, so a single watch item is six listings.
+- **Release dates** — every date announced for the recent films your lists hold, one row per country and release type, alongside when each film's page was last read. A film read and found to have no date announced is remembered as such, so it is not read again on the next round.
 
 Nothing in the database expires. Reads always answer from it, however old it is, and a listing is only ever replaced once a newer read of the same listing has come back in full — so a refused page, a rate limit or a Letterboxd outage costs you a refresh, not your lists. Keeping it current is the background round's job: every `interval_minutes` it reads the watch lists from Letterboxd and then hands what they hold to Radarr, in that order, so a film added to a list reaches Radarr in the same round. The per-list refresh button does the reading half on demand for a single list.
 

@@ -26,6 +26,10 @@ export interface Config {
   };
   letterboxd: {
     username?: string;
+    // Country whose release date the upcoming page reports, spelled as
+    // Letterboxd spells it. Empty means every film is dated by its earliest
+    // release wherever that happens to be.
+    country?: string;
     filters: {
       skip_documentaries: boolean;
       skip_short_films: boolean;
@@ -141,6 +145,56 @@ export interface WatchItemProgress {
   total: number;
   watched: number | null;
   categories: CategoryProgress[];
+}
+
+export interface UpcomingRelease {
+  title: string;
+  // Never null: only films Letterboxd gives a year of this year or later can
+  // have a release still ahead of them, which is what puts one on this page
+  year: number;
+  letterboxd_url: string;
+  letterboxd_slug: string;
+  // ISO date, always today or later: a release that has happened is not upcoming
+  date: string;
+  // What Letterboxd calls the release: Premiere, Theatrical, Digital, Physical…
+  release_type: string;
+  release_country: string;
+  // False when the date is the earliest anywhere because the configured country
+  // has none announced yet, which the row footnotes
+  in_preferred_country: boolean;
+  processed: boolean;
+  tags: string[];
+  // The watch items the film came from, so a release can be traced back to the
+  // list that asked for it
+  watch_items: { id: number; path: string; name: string | null }[];
+}
+
+export interface UpcomingReleases {
+  // Null when none is configured, in which case every date is the earliest
+  // anywhere and the page says so once rather than on every row
+  country: string | null;
+  releases: UpcomingRelease[];
+  total_count: number;
+  // Recent films with nothing left to come — some never had a date announced,
+  // some have had all of theirs — against those whose release table has not
+  // been read yet: nothing ahead against nothing known
+  undated_count: number;
+  unread_count: number;
+  candidate_count: number;
+  // Watch items configured, and how many have a listing to draw candidates
+  // from, so an empty page can say which of the two it is
+  list_count: number;
+  read_list_count: number;
+  // The set is only as current as its oldest read
+  last_read: number | null;
+}
+
+export interface UpcomingRefreshResult {
+  read: number;
+  failed: number;
+  // Films whose turn did not come this round, read by the next one
+  left: number;
+  candidates: number;
 }
 
 export interface LetterboxdTestResult {

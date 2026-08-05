@@ -1,11 +1,12 @@
 import React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
-import { 
-  CogIcon, 
-  FilmIcon, 
+import {
+  CalendarIcon,
+  CogIcon,
+  FilmIcon,
   PlayIcon,
-  ArrowRightOnRectangleIcon 
+  ArrowRightOnRectangleIcon
 } from '@heroicons/react/24/outline';
 
 interface LayoutProps {
@@ -25,6 +26,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const navigation = [
     { name: 'Dashboard', href: '/', icon: PlayIcon },
     { name: 'Watch Items', href: '/watch-items', icon: FilmIcon },
+    { name: 'Upcoming', href: '/upcoming', icon: CalendarIcon },
     { name: 'Configuration', href: '/config', icon: CogIcon },
   ];
 

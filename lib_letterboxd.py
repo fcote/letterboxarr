@@ -2,6 +2,7 @@ import re
 import time
 import json
 import hashlib
+from datetime import date
 from threading import RLock
 from typing import List, Dict, NamedTuple, Optional, Set, Tuple
 from urllib.parse import urljoin
@@ -29,6 +30,22 @@ CATEGORY_SKIP_FILTERS = [
     (CATEGORY_DOCUMENTARY, 'skip_documentaries'),
     (CATEGORY_SHORT_FILM, 'skip_short_films'),
 ]
+
+# Sorting a listing by release date puts the newest films first, which is what
+# lets the upcoming page be built without reading every page of every list: the
+# crawl walks away as soon as it has gone past the films that can still have a
+# release ahead of them. Letterboxd refuses this sort on its browse paths
+# (films/popular/..., films/in/...), which fall back to the whole stored listing.
+UPCOMING_SORT = 'by/release'
+
+# Letterboxd writes release dates as "17 Dec 2025". They are read against this
+# table rather than with strptime, whose %b follows the process locale: the image
+# runs under C today, but a base image that ever set one would silently stop
+# reading every date on the page.
+MONTHS = {
+    'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4, 'May': 5, 'Jun': 6,
+    'Jul': 7, 'Aug': 8, 'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
+}
 
 # Browser fingerprints to impersonate, tried in order. Letterboxd's bot
 # protection refuses some of them on member pages (a 403 on
@@ -60,14 +77,22 @@ class LetterboxdScraper:
         self.crawl_lock = RLock()
 
     @staticmethod
-    def _list_key(watch_item: WatchListItem, global_filters: LetterboxdFilters) -> str:
-        """The key a listing is stored under: its path and the filters it was read with"""
+    def _list_key(watch_item: WatchListItem, global_filters: LetterboxdFilters,
+                  sort: Optional[str] = None) -> str:
+        """The key a listing is stored under: its path, its filters and its order
+
+        The order only joins the key when there is one, so every listing stored
+        before a path could be read in more than one order keeps the key it has
+        and is not crawled again for the sake of a rename.
+        """
         key_data = {
             'path': watch_item.path,
             'global_filters': global_filters.to_dict()
         }
         if watch_item.filters:
             key_data['filters'] = watch_item.filters.to_dict()
+        if sort:
+            key_data['sort'] = sort
 
         key_string = json.dumps(key_data, sort_keys=True)
         return hashlib.md5(key_string.encode()).hexdigest()
@@ -277,6 +302,109 @@ class LetterboxdScraper:
             page += 1
             time.sleep(1)  # Be respectful to the server
 
+    def get_upcoming_films(self, watch_item: WatchListItem,
+                           global_filters: LetterboxdFilters) -> Optional[List[Dict]]:
+        """The films of a watch item that can still have a release ahead of them
+
+        That is the head of its listing sorted by release date, kept down to the
+        films of this year and later: nothing older has a date left to announce
+        that anyone is waiting on. None when nothing has been read for the path
+        at all.
+
+        Falls back to the whole stored listing, narrowed the same way, for the
+        paths Letterboxd will not sort — its browse pages. That costs nothing:
+        the listing is already stored, it is only longer than it needs to be.
+        """
+        stored = self.db.get_list(self._list_key(watch_item, global_filters, UPCOMING_SORT))
+        if stored is not None:
+            return stored
+
+        listing = self.get_stored_list(watch_item, global_filters)
+        if listing is None:
+            return None
+
+        return [movie for movie in listing if self._can_still_release(movie)]
+
+    def refresh_upcoming_films(self, watch_item: WatchListItem, global_filters: LetterboxdFilters,
+                               max_age: Optional[float] = None) -> bool:
+        """Re-read the head of a listing sorted by release date, storing it
+
+        Returns whether it was stored. A crawl that could not read a single page
+        stores nothing and leaves what is there: a path Letterboxd refuses to
+        sort would otherwise replace a good head with an empty one on every
+        round, and the fallback above would never get a chance to answer.
+        """
+        list_key = self._list_key(watch_item, global_filters, UPCOMING_SORT)
+
+        with self.crawl_lock:
+            fetched_at = self.db.get_list_fetched_at(list_key)
+            if max_age is not None and fetched_at is not None \
+                    and time.time() - fetched_at < max_age:
+                return False
+
+            movies, name, read = self._fetch_upcoming(watch_item, global_filters)
+            if not read:
+                self.logger.debug(
+                    f"Could not read {watch_item.path} sorted by release date, "
+                    f"falling back to its stored listing"
+                )
+                return False
+
+            # Stored even when empty, unlike a whole listing: a watch item with
+            # nothing recent in it is the ordinary answer here, not a refused page
+            self.db.save_list(list_key, watch_item.path, movies, name)
+            return True
+
+    def _fetch_upcoming(self, watch_item: WatchListItem,
+                        global_filters: LetterboxdFilters) -> Tuple[List[Dict], Optional[str], bool]:
+        """Crawl a listing newest first, stopping once it is past this year
+
+        Returns the films, the name Letterboxd gives the path, and whether a page
+        was read at all — an empty crawl is a list with nothing recent in it when
+        a page was read, and a refused or missing page when none was.
+
+        The crawl stops on the first page that holds nothing recent enough, and
+        then only if something on it was dated at all. Films Letterboxd gives no
+        year sort together rather than by date, so a page made of those says
+        nothing about how far down the listing the crawl has come; only a film
+        with a year older than the cut-off does.
+        """
+        sorted_item = WatchListItem(
+            path=f"{watch_item.path}/{UPCOMING_SORT}",
+            filters=watch_item.filters,
+            tags=list(watch_item.tags),
+            auto_add=watch_item.auto_add
+        )
+
+        movies: List[Dict] = []
+        name = None
+        read = False
+
+        for page in self._iter_pages(sorted_item, global_filters):
+            read = True
+            name = name or page.name
+
+            recent = [movie for movie in page.movies if self._can_still_release(movie)]
+            movies.extend(recent)
+            if not recent and any(movie.get('year') is not None for movie in page.movies):
+                break
+
+        self.logger.info(
+            f"Found {len(movies)} film(s) of this year or later in {watch_item.path}"
+        )
+        return movies, name, read
+
+    @staticmethod
+    def _can_still_release(movie: Dict) -> bool:
+        """Whether a film is recent enough to be waiting on a release
+
+        This year and later. A film from an earlier year has had its release
+        everywhere it is going to have one, and a film Letterboxd gives no year
+        at all has no date to announce either.
+        """
+        year = movie.get('year')
+        return year is not None and year >= date.today().year
+
     def get_movies_from_path_by_category(self, watch_item: WatchListItem,
                                          global_filters: LetterboxdFilters) -> List[Dict]:
         """Get movies from a Letterboxd path, each tagged with a 'category'
@@ -351,14 +479,17 @@ class LetterboxdScraper:
 
         That is the listing itself plus the one-category-hidden variants the
         movies page needs to tell a short film from a documentary, so a refreshed
-        watch item is entirely refreshed rather than half old.
+        watch item is entirely refreshed rather than half old. The head of the
+        same listing sorted by release date comes with them, which the upcoming
+        page is built from: a page or two rather than all of them.
         """
         variants = [watch_item] + [
             variant for _, variant in self._category_variants(watch_item, global_filters)
         ]
-        return sum(
+        read = sum(
             self.refresh_path(variant, global_filters, max_age) for variant in variants
         )
+        return read + self.refresh_upcoming_films(watch_item, global_filters, max_age)
 
     def _category_variants(self, watch_item: WatchListItem, global_filters: LetterboxdFilters):
         """The (category, watch item with that category hidden) pairs worth reading
@@ -513,6 +644,90 @@ class LetterboxdScraper:
         if body:
             return int(body.get('data-tmdb-id'))
         return None
+
+    def get_film_releases(self, letterboxd_slug: str) -> Optional[List[Dict]]:
+        """The announced release dates of a film, one per country and release type
+
+        Read off the film's own page, which carries the whole releases table
+        rather than only the tab the browser shows first, so this costs the one
+        request. None means the page could not be read and nothing should be
+        stored over what is known; an empty list means it was read and the film
+        has no date announced anywhere yet, which is worth remembering.
+        """
+        url = f"https://letterboxd.com/film/{letterboxd_slug}/"
+        try:
+            with self.crawl_lock:
+                response = self._get(url)
+        except requests.RequestsError as e:
+            self.logger.warning(f"Error reading the release dates of {letterboxd_slug}: {e}")
+            return None
+
+        soup = BeautifulSoup(response.content, 'html.parser')
+        return self._extract_releases(soup)
+
+    @staticmethod
+    def _extract_releases(soup) -> List[Dict]:
+        """Read a film page's releases table, grouped by date
+
+        The table is a flat run of headings and tables under one panel: a
+        heading names the release type and the table that follows it holds a row
+        per date, each listing the countries releasing on that date. The panel is
+        walked in order rather than each table looking backwards for a heading,
+        so a table that has lost its heading is left untyped instead of taking
+        the previous type's name.
+        """
+        panel = soup.find(id='tab-panel-releases-by-date')
+        if not panel:
+            return []
+
+        releases = []
+        release_type = ''
+        for element in panel.find_all(['h3', 'div'], recursive=False):
+            classes = element.get('class') or []
+
+            if element.name == 'h3':
+                release_type = ' '.join(element.get_text(' ', strip=True).split())
+                continue
+
+            if 'release-table' not in classes:
+                continue
+
+            for row in element.find_all('div', class_='listitem', recursive=False):
+                date_cell = row.find('h5', class_='date')
+                date = LetterboxdScraper._parse_release_date(
+                    date_cell.get_text(' ', strip=True) if date_cell else ''
+                )
+                if not date:
+                    continue
+
+                for name in row.select('.release-country-list .name'):
+                    country = ' '.join(name.get_text(' ', strip=True).split())
+                    if country:
+                        releases.append({
+                            'country': country,
+                            'type': release_type,
+                            'date': date
+                        })
+
+        return releases
+
+    @staticmethod
+    def _parse_release_date(text: str) -> Optional[str]:
+        """"17 Dec 2025" as an ISO date, None for anything else
+
+        Anything that is not a whole day is no date to put on a page promising
+        one, so a release Letterboxd only pins down to a month or a year is
+        skipped rather than guessed at.
+        """
+        parts = text.split()
+        if len(parts) != 3:
+            return None
+
+        day, month, year = parts
+        if month not in MONTHS or not day.isdigit() or not year.isdigit():
+            return None
+
+        return f"{int(year):04d}-{MONTHS[month]:02d}-{int(day):02d}"
 
     @staticmethod
     def _extract_list_name(soup) -> Optional[str]:

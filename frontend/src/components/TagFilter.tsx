@@ -3,7 +3,7 @@ import { ChevronDownIcon, TagIcon } from '@heroicons/react/24/outline';
 
 export interface TagOption {
   tag: string;
-  // How many watch items carry it, shown so a tag's reach is obvious before picking
+  // How many rows carry it, shown so a tag's reach is obvious before picking
   count: number;
 }
 
@@ -11,11 +11,15 @@ interface TagFilterProps {
   options: TagOption[];
   selected: string[];
   onChange: (tags: string[]) => void;
+  // What the picked tags narrow down to, named for the page it sits on
+  label?: string;
 }
 
-// Picking several tags widens the result rather than narrowing it: a list matches
+// Picking several tags widens the result rather than narrowing it: a row matches
 // when it carries any one of them, which is what a set of checkboxes reads as.
-const TagFilter: React.FC<TagFilterProps> = ({ options, selected, onChange }) => {
+const TagFilter: React.FC<TagFilterProps> = ({
+  options, selected, onChange, label = 'Lists with any of'
+}) => {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const root = useRef<HTMLDivElement>(null);
@@ -75,7 +79,7 @@ const TagFilter: React.FC<TagFilterProps> = ({ options, selected, onChange }) =>
           className="absolute left-0 z-30 mt-2 w-72 rounded-md border border-dark-border bg-dark-bg-secondary p-2 shadow-xl"
         >
           <div className="flex items-center justify-between px-1 pb-2">
-            <span className="text-xs text-dark-text-muted">Lists with any of</span>
+            <span className="text-xs text-dark-text-muted">{label}</span>
             {selected.length > 0 && (
               <button
                 type="button"

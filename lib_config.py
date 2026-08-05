@@ -96,6 +96,10 @@ class LetterboxdConfig:
     filters: LetterboxdFilters
     watch: List[WatchListItem]
     username: Optional[str] = None  # Profile used to tell which films are already watched
+    # Country whose release date the upcoming page reports, spelled as Letterboxd
+    # spells it on a film's releases table ("France", "USA", "UK"). Unset means
+    # every film is dated by its earliest release wherever that happens to be.
+    country: Optional[str] = None
 
     def to_dict(self) -> dict:
         """Serialize Letterboxd config to dictionary"""
@@ -105,6 +109,8 @@ class LetterboxdConfig:
         }
         if self.username:
             result["username"] = self.username
+        if self.country:
+            result["country"] = self.country
         return result
 
 
@@ -197,7 +203,8 @@ class ConfigLoader:
         letterboxd_config = LetterboxdConfig(
             filters=global_filters,
             watch=watch_list,
-            username=letterboxd_data.get('username')
+            username=letterboxd_data.get('username'),
+            country=letterboxd_data.get('country')
         )
 
         return Config(

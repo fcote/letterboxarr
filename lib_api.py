@@ -1,6 +1,6 @@
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import List, Dict, Optional
 
@@ -567,6 +567,163 @@ def get_watch_item_progress(item_id: int, current_user: dict = Depends(context.g
     except Exception as e:
         logger.error(f"Error getting progress for watch item: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get progress: {str(e)}")
+
+def upcoming_release(releases: List[Dict], country: Optional[str],
+                     today: str) -> Optional[Dict]:
+    """The release a film is dated by, None when it has none still to come
+
+    The soonest release still ahead in the configured country is what the page
+    promises. Whether that country has anything to say at all is what decides
+    the rest, and the two ways it can say nothing are not the same thing:
+
+    A country that has announced no date whatsoever has not made up its mind
+    yet, so the soonest date anywhere stands in, flagged as somebody else's. A
+    date from another country is a far better answer than no date at all.
+
+    A country whose every announced date has been and gone has made up its
+    mind: the film is out where you are. Nothing about it is upcoming, and
+    dating it by a premiere still to come on the other side of the world would
+    tell you to wait for a film you could watch tonight.
+
+    Only releases still ahead are ever picked from. Taking the soonest of all
+    of them and dropping the film when that one had passed would date every
+    film by its first release anywhere, which is always a premiere or a
+    theatrical run: no digital or physical date would ever be reached, and a
+    festival premiere would bury the film's own opening months later.
+
+    Several countries commonly share the soonest date, so the type and the
+    country break the tie: which of them a row names would otherwise depend on
+    the order the release table happened to be read in, and would change under
+    the reader for no reason on the next refresh.
+    """
+    def soonest(candidates: List[Dict]) -> Optional[Dict]:
+        ahead = [release for release in candidates if release['date'] >= today]
+        if not ahead:
+            return None
+        return min(ahead, key=lambda release: (release['date'], release['type'],
+                                               release['country']))
+
+    local = [release for release in releases if release['country'] == country]
+    if local:
+        chosen = soonest(local)
+        return {**chosen, 'in_preferred_country': True} if chosen else None
+
+    chosen = soonest(releases)
+    return {**chosen, 'in_preferred_country': False} if chosen else None
+
+
+# Reads only what is stored, like the progress endpoints above: release tables
+# are read in the background, so opening the upcoming page never waits on a
+# crawl. Declared sync all the same, since it walks every stored listing.
+@context.app.get("/api/upcoming")
+def get_upcoming(current_user: dict = Depends(context.get_current_user)):
+    """The films the watch items are waiting on, in release order
+
+    Only the films of this year and later are considered, and of those only the
+    ones with a date still ahead: a film whose every announced release has come
+    and gone has nothing upcoming about it, wherever it came out. Films without
+    a date ahead are counted rather than listed, so a page showing three
+    releases out of forty says why.
+    """
+    if not context.current_config or not context.sync_instance:
+        raise HTTPException(status_code=404, detail="Configuration not found")
+
+    try:
+        db = context.sync_instance.db
+        country = context.current_config.letterboxd.country
+        candidates, read_lists = context.sync_instance.refresher.upcoming_candidates()
+        stored = db.get_film_releases()
+        read_at = db.get_release_reads()
+        processed_ids, processed_slugs = db.get_added_keys()
+        names = {
+            item.path: db.get_path_name(item.path)
+            for item in context.current_config.letterboxd.watch
+        }
+        today = date.today().isoformat()
+
+        releases = []
+        undated = 0
+        unread = 0
+        for candidate in candidates:
+            slug = candidate['letterboxd_slug']
+            if slug not in read_at:
+                unread += 1
+                continue
+
+            release = upcoming_release(stored.get(slug, []), country, today)
+            if release is None:
+                undated += 1
+                continue
+
+            releases.append({
+                "title": candidate["title"],
+                "year": candidate["year"],
+                "letterboxd_url": f"https://letterboxd.com/film/{slug}/",
+                "letterboxd_slug": slug,
+                "date": release["date"],
+                "release_type": release["type"],
+                "release_country": release["country"],
+                # False when the date comes from another country than the
+                # configured one, which is what the page footnotes
+                "in_preferred_country": release["in_preferred_country"],
+                "processed": movie_key(candidate) in processed_ids or slug in processed_slugs,
+                "tags": candidate["tags"],
+                "watch_items": [
+                    {**watch_item, "name": names.get(watch_item["path"])}
+                    for watch_item in candidate["watch_items"]
+                ]
+            })
+
+        releases.sort(key=lambda release: (release["date"], release["title"]))
+        read_times = [read_at[c["letterboxd_slug"]] for c in candidates
+                      if c["letterboxd_slug"] in read_at]
+
+        return {
+            # Null when none is configured, in which case every date below is
+            # the earliest anywhere and the page says so once rather than per row
+            "country": country,
+            "releases": releases,
+            "total_count": len(releases),
+            # Films with nothing left to come — some have no date announced at
+            # all, some have had every one of theirs — against those whose
+            # release table has not been read: the difference between a film
+            # with nothing ahead and one nothing is known about
+            "undated_count": undated,
+            "unread_count": unread,
+            "candidate_count": len(candidates),
+            # Watch items configured, and how many of them have a listing to
+            # take candidates from: without these, a page with nothing on it
+            # cannot tell "nothing recent in your lists" from "nothing read yet"
+            "list_count": len(context.current_config.letterboxd.watch),
+            "read_list_count": read_lists,
+            # The set is only as current as its oldest read, as on the dashboard
+            "last_read": min(read_times) if read_times else None
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting the upcoming releases: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get upcoming releases: {str(e)}")
+
+
+@context.app.post("/api/upcoming/refresh")
+def refresh_upcoming(current_user: dict = Depends(context.get_current_user)):
+    """Read the release tables again now, ahead of their next scheduled read
+
+    Answers once they are stored, which is a page per recent film: the caller
+    wants to see the new dates, and returning before they are there would only
+    have it read the old ones.
+    """
+    if not context.sync_instance:
+        raise HTTPException(status_code=404, detail="Sync instance not available")
+
+    try:
+        logger.info("Refreshing the release dates on request")
+        return context.sync_instance.refresher.refresh_releases(max_age=0)
+
+    except Exception as e:
+        logger.error(f"Error refreshing the release dates: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to refresh release dates: {str(e)}")
+
 
 @context.app.post("/api/sync/run")
 async def run_sync(background_tasks: BackgroundTasks, current_user: dict = Depends(context.get_current_user)):

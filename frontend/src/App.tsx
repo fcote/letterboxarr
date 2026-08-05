@@ -10,6 +10,7 @@ import DashboardPage from './pages/DashboardPage';
 import ConfigPage from './pages/ConfigPage';
 import WatchItemsPage from './pages/WatchItemsPage';
 import MoviesPage from './pages/MoviesPage';
+import UpcomingPage from './pages/UpcomingPage';
 
 // Create a client
 const queryClient = new QueryClient({
@@ -103,8 +104,17 @@ const App: React.FC = () => {
                 } 
               />
               
-              <Route 
-                path="/movies/:itemId" 
+              <Route
+                path="/upcoming"
+                element={
+                  <ProtectedRoute>
+                    <UpcomingPage />
+                  </ProtectedRoute>
+                }
+              />
+
+              <Route
+                path="/movies/:itemId"
                 element={
                   <ProtectedRoute>
                     <MoviesPage />

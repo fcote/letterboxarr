@@ -4,6 +4,7 @@ import { configAPI, radarrAPI } from '../utils/api';
 import { Config, QualityProfile } from '../types';
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
+import { RELEASE_COUNTRIES } from '../utils/countries';
 
 const ConfigPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
@@ -62,6 +63,7 @@ const ConfigPage: React.FC = () => {
   }
 
   const selectedProfile = watch('radarr.quality_profile');
+  const selectedCountry = watch('letterboxd.country');
 
   return (
     <Layout>
@@ -270,6 +272,43 @@ const ConfigPage: React.FC = () => {
                     </div>
                     <p className="mt-2 text-sm text-dark-text-muted">
                       Leave empty to hide the watched indicator on the movies pages. The profile must be public.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Release country */}
+          <div className="card px-4 py-5 sm:p-6">
+            <div className="md:grid md:grid-cols-3 md:gap-6">
+              <div className="md:col-span-1">
+                <h3 className="text-lg font-medium leading-6 text-dark-text-primary">Release Country</h3>
+                <p className="mt-1 text-sm text-dark-text-muted">
+                  Which country's release date the Upcoming page shows.
+                </p>
+              </div>
+              <div className="mt-5 md:mt-0 md:col-span-2">
+                <div className="grid grid-cols-3 gap-6">
+                  <div className="col-span-3 sm:col-span-2">
+                    <label htmlFor="letterboxd.country" className="block text-sm font-medium text-dark-text-secondary">
+                      Country (optional)
+                    </label>
+                    <select {...register('letterboxd.country')} className="input-field">
+                      <option value="">No preference — earliest date anywhere</option>
+                      {/* A country set by hand in config.yml that Letterboxd has
+                          never been seen to name would otherwise be replaced by
+                          whichever one happens to be listed first */}
+                      {selectedCountry && !RELEASE_COUNTRIES.includes(selectedCountry) && (
+                        <option value={selectedCountry}>{selectedCountry} (from config.yml)</option>
+                      )}
+                      {RELEASE_COUNTRIES.map(country => (
+                        <option key={country} value={country}>{country}</option>
+                      ))}
+                    </select>
+                    <p className="mt-2 text-sm text-dark-text-muted">
+                      A film with no date announced here yet is dated by its earliest release
+                      anywhere instead, and the Upcoming page says which country that was.
                     </p>
                   </div>
                 </div>
