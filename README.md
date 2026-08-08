@@ -145,11 +145,15 @@ Movies from each list can be automatically tagged in Radarr. Filters can be appl
 
 ### Upcoming Releases
 
-The **Upcoming** tab lists the films your watch lists are still waiting on, soonest first, with the release type and a button to hand one to Radarr ahead of time so it is monitored and grabbed the day it lands.
+The **Upcoming** tab lists the films your watch lists are still waiting on, soonest first, with a button to hand one to Radarr ahead of time so it is monitored and grabbed the day it lands.
+
+Each row opens with what kind of entry it is — the same film strip, clock, video camera and screen the movies page counts films, short films, documentaries and TV shows under — and carries a chip per watch list the film came from, marked by the kind of list it is. Letterboxd names its own listings after what gathers them, so a chip for `director/denis-villeneuve` reads "Denis Villeneuve" rather than a row of lists all reading "Films directed b…". Hovering either the icon or the chips gives the full names, the date and how far off it is, the release and its country, and the tags. Note that a category your filters skip never reaches these lists at all, so filtering out documentaries means no row can ever be marked as one.
+
+Festival premieres and physical releases are left out: neither says anything about when a film can actually be watched, and dating a film by a red carpet nobody can attend or by a disc pressed months after it has been streaming would put a date on the page that is no use. A film left with nothing but one of those counts as having nothing ahead.
 
 Set `letterboxd.country` — on the configuration page or in `config.yml` — to be told when a film comes out where you are. Each film is dated by its soonest release still to come in that country. A film with **no** date announced there at all is dated by the soonest release anywhere instead, and the row says which country that was rather than pretending the date is local; a film whose dates there have all passed is out where you are, so it drops off the page rather than being dated by a release on the other side of the world.
 
-Only dates still ahead are considered, so a film that has already opened stays on the page for its digital, physical or later local release rather than disappearing the day it premiered somewhere. Films with nothing ahead are counted on the page rather than listed.
+Only dates still ahead are considered, so a film that has already opened stays on the page for its digital or later local release rather than disappearing the day it premiered somewhere. Films with nothing ahead are counted on the page rather than listed.
 
 Only films from the current year onwards are considered. Finding them costs one or two pages per list rather than all of them: each list is read again sorted by release date, newest first, and the crawl stops as soon as it is past the current year. Each of those films then has its release table read from its own Letterboxd page, at most 100 per round and no more often than twice a day, so a long watch list fills in over a few rounds rather than in one long crawl. A film first released in an earlier year is not looked at, so a late local or home-media date for one of those will not appear.
 

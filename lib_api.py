@@ -568,9 +568,23 @@ def get_watch_item_progress(item_id: int, current_user: dict = Depends(context.g
         logger.error(f"Error getting progress for watch item: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get progress: {str(e)}")
 
+# Release types the page has no use for, whatever country they are in. A
+# premiere is a festival screening or a red carpet nobody can buy a ticket to,
+# and a disc pressing lands months after the film has already been in cinemas
+# and online: dating a film by either would announce a release that tells you
+# nothing about when you can actually watch it.
+IGNORED_RELEASE_TYPES = {'Premiere', 'Physical'}
+
+
 def upcoming_release(releases: List[Dict], country: Optional[str],
                      today: str) -> Optional[Dict]:
     """The release a film is dated by, None when it has none still to come
+
+    Premieres and physical releases are dropped before anything else is
+    decided, so they neither date a film nor stand in the way of the release
+    that should: a country that has announced nothing but a premiere or a disc
+    pressing counts as having announced nothing at all, and the film falls back
+    to the earliest date elsewhere like any other.
 
     The soonest release still ahead in the configured country is what the page
     promises. Whether that country has anything to say at all is what decides
@@ -587,9 +601,9 @@ def upcoming_release(releases: List[Dict], country: Optional[str],
 
     Only releases still ahead are ever picked from. Taking the soonest of all
     of them and dropping the film when that one had passed would date every
-    film by its first release anywhere, which is always a premiere or a
-    theatrical run: no digital or physical date would ever be reached, and a
-    festival premiere would bury the film's own opening months later.
+    film by its first release anywhere, which is always a theatrical run: no
+    digital date would ever be reached, and a limited opening would bury the
+    film's own wide release months later.
 
     Several countries commonly share the soonest date, so the type and the
     country break the tie: which of them a row names would otherwise depend on
@@ -602,6 +616,9 @@ def upcoming_release(releases: List[Dict], country: Optional[str],
             return None
         return min(ahead, key=lambda release: (release['date'], release['type'],
                                                release['country']))
+
+    releases = [release for release in releases
+                if release['type'] not in IGNORED_RELEASE_TYPES]
 
     local = [release for release in releases if release['country'] == country]
     if local:
@@ -621,9 +638,10 @@ def get_upcoming(current_user: dict = Depends(context.get_current_user)):
 
     Only the films of this year and later are considered, and of those only the
     ones with a date still ahead: a film whose every announced release has come
-    and gone has nothing upcoming about it, wherever it came out. Films without
-    a date ahead are counted rather than listed, so a page showing three
-    releases out of forty says why.
+    and gone has nothing upcoming about it, wherever it came out. Films left
+    with nothing but a premiere or a disc pressing count as having nothing
+    ahead too. Films without a date ahead are counted rather than listed, so a
+    page showing three releases out of forty says why.
     """
     if not context.current_config or not context.sync_instance:
         raise HTTPException(status_code=404, detail="Configuration not found")
@@ -660,6 +678,9 @@ def get_upcoming(current_user: dict = Depends(context.get_current_user)):
                 "year": candidate["year"],
                 "letterboxd_url": f"https://letterboxd.com/film/{slug}/",
                 "letterboxd_slug": slug,
+                # What kind of entry it is, never "unreleased": everything here
+                # is that, and the page is asking what the film itself is
+                "category": candidate["category"],
                 "date": release["date"],
                 "release_type": release["type"],
                 "release_country": release["country"],
@@ -685,9 +706,10 @@ def get_upcoming(current_user: dict = Depends(context.get_current_user)):
             "releases": releases,
             "total_count": len(releases),
             # Films with nothing left to come — some have no date announced at
-            # all, some have had every one of theirs — against those whose
-            # release table has not been read: the difference between a film
-            # with nothing ahead and one nothing is known about
+            # all, some have had every one of theirs, some have only a premiere
+            # or a disc pressing left — against those whose release table has
+            # not been read: the difference between a film with nothing ahead
+            # and one nothing is known about
             "undated_count": undated,
             "unread_count": unread,
             "candidate_count": len(candidates),

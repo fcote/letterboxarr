@@ -8,15 +8,39 @@ import { UpcomingRelease, UpcomingReleases } from '../types';
 import { relativeTime, releaseDay, releaseMonth, timeUntil } from '../utils/time';
 import {
   ArrowPathIcon,
+  BookmarkIcon,
   CalendarIcon,
   CheckCircleIcon,
   ClockIcon,
   ExclamationCircleIcon,
+  FilmIcon,
   GlobeAltIcon,
-  InformationCircleIcon,
   MagnifyingGlassIcon,
-  PlusIcon
+  PlusIcon,
+  QueueListIcon
 } from '@heroicons/react/24/outline';
+import { categoryDescriptor } from '../utils/categories';
+
+type Icon = React.ComponentType<{ className?: string }>;
+
+// Watch items are any Letterboxd path, and the shape of the path is what says
+// what kind of list it is: somebody's watchlist, a list they wrote, or one of
+// Letterboxd's own listings — the films of a year, a genre, an actor.
+const listIcon = (path: string): Icon => {
+  const section = path.split('/')[1];
+  if (section === 'watchlist') return BookmarkIcon;
+  if (section === 'list') return QueueListIcon;
+  return FilmIcon;
+};
+
+// Letterboxd names its own listings after what gathers them — "Films directed
+// by Denis Villeneuve", "Films starring Isabelle Huppert" — so a row with room
+// for a few words shows a dozen lists all reading "Films directed b…". The name
+// at the end is the only part that tells them apart, and the icon in front
+// already says it was a listing of somebody's films. The whole name is on the
+// hover, for the lists this leaves nothing of.
+const listLabel = (name: string): string =>
+  name.replace(/^Films\s+(?:.*?\bby|starring|from)\s+/i, '') || name;
 
 type SortKey = 'soonest' | 'furthest';
 
@@ -204,90 +228,138 @@ const UpcomingPage: React.FC = () => {
   const fellBack = (release: UpcomingRelease) =>
     Boolean(data.country) && !release.in_preferred_country;
 
-  // What a row cannot show on one line: how far off the release is, which list
-  // asked for it, and its tags
-  const summary = (release: UpcomingRelease): string[] => [
+  // What the icon at the head of the row cannot show on its own: what kind of
+  // entry it is in words, and how far off the release is
+  const releaseSummary = (release: UpcomingRelease): string[] => [
     `${release.title} (${release.year})`,
+    categoryDescriptor(release.category).label,
     `${releaseDay(release.date)} — ${timeUntil(release.date)}`,
     fellBack(release)
       ? `No date announced in ${data.country} yet — this is the earliest anywhere: `
         + `${release.release_type} in ${release.release_country}`
-      : `${release.release_type} release in ${release.release_country}`,
-    release.tags.length > 0 ? `Tags: ${release.tags.join(', ')}` : 'No tags',
-    'From ' + release.watch_items.map(item => item.name || item.path).join(', ')
+      : `${release.release_type} release in ${release.release_country}`
   ];
 
-  const renderRelease = (release: UpcomingRelease) => (
-    <li key={release.letterboxd_slug} className="px-4 py-2">
-      {/* One line per release: the title takes what room is left, and whatever
-          is not needed at a glance hangs off the information icon */}
-      <div className="flex items-center gap-3">
-        <span className="w-24 flex-shrink-0 whitespace-nowrap text-sm font-medium text-dark-text-secondary">
-          {releaseDay(release.date)}
-        </span>
+  // What the list icons cannot: which lists exactly, and what they tag the film
+  // with. Every one of them is named rather than only the ones whose name fits
+  // on the row, and the paths come along since two lists can read alike.
+  const originSummary = (release: UpcomingRelease): string[] => [
+    release.watch_items.length === 1 ? 'From your watch list' : 'From your watch lists',
+    ...release.watch_items.map(item =>
+      item.name ? `${item.name} — letterboxd.com/${item.path}` : `letterboxd.com/${item.path}`),
+    release.tags.length > 0 ? `Tags: ${release.tags.join(', ')}` : 'No tags'
+  ];
 
-        <Tooltip
-          lines={summary(release)}
-          focusable={false}
-          className="inline-flex flex-shrink-0 rounded p-1 text-dark-text-muted hover:text-brand-blue"
-        >
-          <InformationCircleIcon className="h-4 w-4" />
-        </Tooltip>
+  const renderRelease = (release: UpcomingRelease) => {
+    const kind = categoryDescriptor(release.category);
+    const KindIcon = kind.icon;
 
-        <div className="min-w-0 flex-1">
-          <a
-            href={release.letterboxd_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm font-medium text-dark-text-primary hover:text-brand-blue"
-          >
-            {release.title}
-          </a>
-          <span className="ml-2 text-sm text-dark-text-muted">{release.year}</span>
-        </div>
-
-        {/* The country is spelled out unless it is the configured one, which the
-            page has already named once and every row would only repeat back */}
-        <span
-          className={`hidden whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-medium sm:inline-flex sm:items-center ${
-            fellBack(release)
-              ? 'border-brand-orange/30 bg-brand-orange/20 text-brand-orange'
-              : 'border-dark-border bg-dark-bg-tertiary text-dark-text-muted'
-          }`}
-        >
-          {fellBack(release) && <GlobeAltIcon className="mr-1 h-3 w-3" />}
-          {release.release_type}
-          {!release.in_preferred_country && ` · ${release.release_country}`}
-        </span>
-
-        {release.processed ? (
-          <span className="inline-flex items-center whitespace-nowrap rounded-full border border-brand-green/30 bg-brand-green/20 px-2.5 py-0.5 text-xs font-medium text-brand-green">
-            <CheckCircleIcon className="mr-1 h-3 w-3" />
-            In Radarr
+    return (
+      <li key={release.letterboxd_slug} className="px-4 py-2">
+        {/* One line per release: the title takes what room is left, what kind of
+            entry it is and the lists it came from are pictures rather than
+            words, and what neither can say hangs off them on hover */}
+        <div className="flex items-center gap-3">
+          <span className="w-24 flex-shrink-0 whitespace-nowrap text-sm font-medium text-dark-text-secondary">
+            {releaseDay(release.date)}
           </span>
-        ) : (
-          <button
-            onClick={() => handleAdd(release)}
-            disabled={adding.indexOf(release.letterboxd_slug) !== -1}
-            className="btn-primary flex flex-shrink-0 items-center px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-            title="Hand it to Radarr now, so it is picked up as soon as it comes out"
+
+          <Tooltip
+            lines={releaseSummary(release)}
+            focusable={false}
+            className="inline-flex flex-shrink-0 rounded p-1 text-dark-text-muted hover:text-brand-blue"
           >
-            {adding.indexOf(release.letterboxd_slug) !== -1 ? (
-              <>
-                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
-                Adding...
-              </>
-            ) : (
-              <>
-                <PlusIcon className="w-3 mr-1" />
-                Add
-              </>
-            )}
-          </button>
-        )}
-      </div>
-    </li>
-  );
+            {/* The same picture the movies and watch items pages count this
+                kind of entry under, so a film strip means there what it means
+                here. A picture reads as nothing to anything not looking. */}
+            <KindIcon className="h-4 w-4" />
+            <span className="sr-only">{kind.label}</span>
+          </Tooltip>
+
+          <div className="min-w-0 flex-1">
+            <a
+              href={release.letterboxd_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm font-medium text-dark-text-primary hover:text-brand-blue"
+            >
+              {release.title}
+            </a>
+            <span className="ml-2 text-sm text-dark-text-muted">{release.year}</span>
+          </div>
+
+          {/* One chip per list the film came from. The name is only there once
+              the row is wide enough to spare it: below that the picture says
+              what kind of list it was and the hover says which. */}
+          <Tooltip
+            lines={originSummary(release)}
+            focusable={false}
+            className="flex flex-shrink-0 items-center gap-1"
+          >
+            {release.watch_items.map(item => {
+              const ListIcon = listIcon(item.path);
+              const name = item.name ? listLabel(item.name) : item.path;
+              return (
+                <span
+                  key={item.id}
+                  className="inline-flex items-center rounded-full border border-dark-border bg-dark-bg-tertiary px-2 py-0.5 text-xs font-medium text-dark-text-muted"
+                >
+                  <ListIcon className="h-3 w-3 flex-shrink-0" />
+                  <span className="ml-1 hidden max-w-32 truncate lg:block">{name}</span>
+                  {/* The same name, for where the row is too narrow to show it
+                      and for anything not reading the picture. Taken out of the
+                      tree above that width rather than hidden, so it is not read
+                      twice over once the visible one is there. */}
+                  <span className="sr-only lg:hidden">{name}</span>
+                </span>
+              );
+            })}
+          </Tooltip>
+
+          {/* Which release the date is, and the country unless it is the
+              configured one, which the page has already named once and every
+              row would only repeat back */}
+          <span
+            className={`hidden whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-medium sm:inline-flex sm:items-center ${
+              fellBack(release)
+                ? 'border-brand-orange/30 bg-brand-orange/20 text-brand-orange'
+                : 'border-dark-border bg-dark-bg-tertiary text-dark-text-muted'
+            }`}
+          >
+            {fellBack(release) && <GlobeAltIcon className="mr-1 h-3 w-3" />}
+            {release.release_type}
+            {!release.in_preferred_country && ` · ${release.release_country}`}
+          </span>
+
+          {release.processed ? (
+            <span className="inline-flex items-center whitespace-nowrap rounded-full border border-brand-green/30 bg-brand-green/20 px-2.5 py-0.5 text-xs font-medium text-brand-green">
+              <CheckCircleIcon className="mr-1 h-3 w-3" />
+              In Radarr
+            </span>
+          ) : (
+            <button
+              onClick={() => handleAdd(release)}
+              disabled={adding.indexOf(release.letterboxd_slug) !== -1}
+              className="btn-primary flex flex-shrink-0 items-center px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+              title="Hand it to Radarr now, so it is picked up as soon as it comes out"
+            >
+              {adding.indexOf(release.letterboxd_slug) !== -1 ? (
+                <>
+                  <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
+                  Adding...
+                </>
+              ) : (
+                <>
+                  <PlusIcon className="w-3 mr-1" />
+                  Add
+                </>
+              )}
+            </button>
+          )}
+        </div>
+      </li>
+    );
+  };
 
   return (
     <Layout>
@@ -303,6 +375,7 @@ const UpcomingPage: React.FC = () => {
                 : <>The earliest release date anywhere for the films your watch lists are waiting on.
                    Pick a country on the configuration page to be told when they come out where
                    you are.</>}
+              {' '}Festival premieres and physical releases are left out.
               {data.last_read != null && ` Read from Letterboxd ${relativeTime(data.last_read)}.`}
             </p>
           </div>
@@ -344,7 +417,8 @@ const UpcomingPage: React.FC = () => {
                 <div className="ml-5 w-0 flex-1">
                   <dl>
                     {/* Some have nothing announced anywhere, some have had
-                        every date they were given: both are "nothing ahead" */}
+                        every date they were given, some have only a premiere or
+                        a disc pressing left: all are "nothing ahead" */}
                     <dt className="text-sm font-medium text-dark-text-muted truncate">No date ahead</dt>
                     <dd className="text-lg font-medium text-dark-text-primary">{data.undated_count}</dd>
                   </dl>

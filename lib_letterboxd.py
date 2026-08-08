@@ -4,7 +4,7 @@ import json
 import hashlib
 from datetime import date
 from threading import RLock
-from typing import List, Dict, NamedTuple, Optional, Set, Tuple
+from typing import Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
 from urllib.parse import urljoin
 
 from curl_cffi import requests
@@ -448,16 +448,46 @@ class LetterboxdScraper:
             lambda variant: self.get_stored_list(variant, global_filters)
         )
 
+    def get_stored_categories(self, watch_item: WatchListItem,
+                              global_filters: LetterboxdFilters) -> Dict[str, str]:
+        """What kind of entry each film of a stored listing is, by slug
+
+        The unreleased bucket is left out, which is what makes this worth having
+        next to get_stored_movies_by_category: unreleased comes first of the
+        categories, and everything the upcoming page lists is unreleased by
+        definition, so asking that way would sort every film there into it and
+        bury the short film or the documentary underneath.
+
+        Empty rather than None when nothing has been read: a caller asking what
+        kind of thing a film is can carry on without an answer, where one asking
+        for a list's contents cannot.
+        """
+        movies = self.get_stored_list(watch_item, global_filters)
+        if movies is None:
+            return {}
+
+        categorised = self._categorise(
+            movies, watch_item, global_filters,
+            lambda variant: self.get_stored_list(variant, global_filters),
+            skip=(CATEGORY_UNRELEASED,)
+        )
+        return {movie['letterboxd_slug']: movie['category'] for movie in categorised}
+
     def _categorise(self, movies: List[Dict], watch_item: WatchListItem,
-                    global_filters: LetterboxdFilters, listing_of) -> List[Dict]:
+                    global_filters: LetterboxdFilters, listing_of,
+                    skip: Sequence[str] = ()) -> List[Dict]:
         """Tag each movie with the category its absence from a variant reveals
 
         A movie missing from the listing read with one category hidden is of that
         category, and the first match wins since the categories overlap. Whatever
-        listing_of cannot supply is skipped, leaving those movies as plain films.
+        listing_of cannot supply is skipped, leaving those movies as plain films,
+        as are the movies only the skipped categories would have claimed.
         """
         categories = {}
         for category, hidden_item in self._category_variants(watch_item, global_filters):
+            if category in skip:
+                continue
+
             listing = listing_of(hidden_item)
             if listing is None:
                 continue

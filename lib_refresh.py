@@ -15,7 +15,7 @@ from typing import Dict, List, NamedTuple, Optional
 
 from lib_config import Config, WatchListItem
 from lib_db import Database
-from lib_letterboxd import LetterboxdScraper
+from lib_letterboxd import CATEGORY_FILM, LetterboxdScraper
 
 # How old a film's release table may be before it is read again. Dates are
 # announced and moved over weeks, not minutes, so re-reading one on every sync
@@ -112,12 +112,21 @@ class ListRefresher:
             if movies is None:
                 continue
 
+            # What kind of thing each entry is, read off the same listings the
+            # movies page is categorised from. A list whose category variants
+            # have not been read yet places nothing, which is a film until it
+            # has been: no page waits on a crawl to say what it already knows.
+            categories = self.scraper.get_stored_categories(
+                watch_item, self.config.letterboxd.filters
+            )
+
             read_lists += 1
             for movie in movies:
                 candidate = candidates.setdefault(movie['letterboxd_slug'], {
                     'letterboxd_slug': movie['letterboxd_slug'],
                     'title': movie['title'],
                     'year': movie.get('year'),
+                    'category': CATEGORY_FILM,
                     'tags': [],
                     'watch_items': []
                 })
@@ -125,6 +134,14 @@ class ListRefresher:
                 candidate['tags'].extend(
                     tag for tag in watch_item.tags if tag not in candidate['tags']
                 )
+
+                # A film on several lists takes the first kind any of them could
+                # place it under. What a film is does not depend on the list it
+                # was found through, so the lists cannot disagree; one of them
+                # not having read its variants yet is what this is for.
+                category = categories.get(movie['letterboxd_slug'], CATEGORY_FILM)
+                if category != CATEGORY_FILM:
+                    candidate['category'] = category
 
         return UpcomingCandidates(list(candidates.values()), read_lists)
 

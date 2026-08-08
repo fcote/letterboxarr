@@ -10,7 +10,10 @@ import { CategoryProgress, MovieCategory } from '../types';
 
 export interface CategoryDescriptor {
   category: MovieCategory;
+  // Names the group of them, on the pages that count a list by category
   title: string;
+  // Names one of them, for a page naming the kind of a single entry
+  label: string;
   description: string;
   icon: React.ComponentType<React.ComponentProps<'svg'>>;
 }
@@ -20,30 +23,35 @@ export const MOVIE_CATEGORIES: CategoryDescriptor[] = [
   {
     category: 'film',
     title: 'Films',
+    label: 'Film',
     description: 'Feature films from this Letterboxd list and their sync status.',
     icon: FilmIcon
   },
   {
     category: 'short_film',
     title: 'Short Films',
+    label: 'Short film',
     description: 'Entries Letterboxd classifies as short films.',
     icon: ClockIcon
   },
   {
     category: 'documentary',
     title: 'Documentaries',
+    label: 'Documentary',
     description: 'Entries Letterboxd classifies as documentaries.',
     icon: VideoCameraIcon
   },
   {
     category: 'tv_show',
     title: 'TV Shows',
+    label: 'TV show',
     description: 'Entries Letterboxd classifies as TV shows. Radarr cannot manage these.',
     icon: TvIcon
   },
   {
     category: 'unreleased',
     title: 'Unreleased',
+    label: 'Unreleased',
     description: 'Not released yet, whatever their type. Radarr can track them but has nothing to grab.',
     icon: CalendarIcon
   }

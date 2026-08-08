@@ -154,9 +154,14 @@ export interface UpcomingRelease {
   year: number;
   letterboxd_url: string;
   letterboxd_slug: string;
+  // What kind of entry it is. Never 'unreleased', which everything here is by
+  // definition: this says what the film itself is, not the state it is in.
+  category: MovieCategory;
   // ISO date, always today or later: a release that has happened is not upcoming
   date: string;
-  // What Letterboxd calls the release: Premiere, Theatrical, Digital, Physical…
+  // What Letterboxd calls the release: Theatrical, Theatrical limited, Digital,
+  // TV. Never a premiere or a physical release — the API leaves those out, as
+  // neither says anything about when the film can be watched.
   release_type: string;
   release_country: string;
   // False when the date is the earliest anywhere because the configured country
