@@ -1,8 +1,9 @@
 import logging
+import math
 import os
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, NamedTuple, Optional
 
 import yaml
 from fastapi import FastAPI, HTTPException, Depends, status, BackgroundTasks
@@ -376,7 +377,13 @@ async def get_processed_movies(current_user: dict = Depends(context.get_current_
         raise HTTPException(status_code=500, detail=f"Failed to get processed movies: {str(e)}")
 
 def get_categorised_movies(item_id: int) -> List[Dict]:
-    """Movies of a watch item, each with its category and Radarr status"""
+    """Movies of a watch item, each with its category, Radarr status and rating
+
+    The ratings are the stored ones, read once for the whole listing rather than
+    a film at a time: they come from the database the background rounds fill in,
+    so a film whose turn has not come round yet carries none rather than holding
+    the page up while Letterboxd is asked for it.
+    """
     watch_item = context.current_config.letterboxd.watch[item_id]
     movies = context.sync_instance.letterboxd.get_movies_from_path_by_category(
         watch_item=watch_item,
@@ -384,6 +391,7 @@ def get_categorised_movies(item_id: int) -> List[Dict]:
     )
 
     processed_ids, processed_slugs = context.sync_instance.db.get_added_keys()
+    ratings = get_film_ratings().by_slug
 
     return [
         {
@@ -393,7 +401,9 @@ def get_categorised_movies(item_id: int) -> List[Dict]:
             "letterboxd_slug": movie["letterboxd_slug"],
             "processed": movie_key(movie) in processed_ids or movie["letterboxd_slug"] in processed_slugs,
             "tmdb_id": movie.get("tmdb_id"),
-            "category": movie.get("category", CATEGORY_FILM)
+            "category": movie.get("category", CATEGORY_FILM),
+            "rating": ratings.get(movie["letterboxd_slug"], {}).get("rating"),
+            "rating_count": ratings.get(movie["letterboxd_slug"], {}).get("rating_count")
         }
         for movie in movies
     ]
@@ -414,13 +424,16 @@ def get_stored_categorised_movies(item_id: int) -> Optional[List[Dict]]:
 
 
 def watch_item_progress(item_id: int, movies: Optional[List[Dict]],
-                        watched_slugs: Optional[set]) -> Dict:
+                        watched_slugs: Optional[set], ratings: 'FilmRatings') -> Dict:
     """Per-category count of movies already watched for one watch item
 
     read is False when the listing has never been read from Letterboxd; the
     counts are all zero in that case and the page says so rather than reporting
     an empty list. watched counts are None when no Letterboxd profile is
     configured, since watched status is what the profile provides.
+
+    How Letterboxd rates the list comes back with it: the page sorts on both,
+    and working them out means walking the same listing twice otherwise.
     """
     listing = movies if movies is not None else []
 
@@ -443,7 +456,100 @@ def watch_item_progress(item_id: int, movies: Optional[List[Dict]],
         "read": movies is not None,
         "total": len(listing),
         "watched": watched_in(listing),
-        "categories": categories
+        "categories": categories,
+        "ratings": watch_item_ratings(movies, ratings)
+    }
+
+
+# How many films' worth of the average across every watch item a list's own
+# average is weighed against. Three films rated 4.6 between them say much less
+# about a list than eighty films averaging 4.6 do, and this is what "much less"
+# comes to: against ten, three films carry under a quarter of their own weight
+# and eighty carry nearly all of it.
+RATING_PRIOR_FILMS = 10
+
+
+class FilmRatings(NamedTuple):
+    """The stored ratings, and the average across all of them to weigh against
+
+    The average is worked out once for a request rather than once per watch
+    item: every list is weighed against the same one, and it is a pass over
+    every film watched.
+    """
+    by_slug: Dict[str, Dict]
+    mean: Optional[float]
+
+
+def get_film_ratings() -> FilmRatings:
+    """Every stored film rating, with the average across them
+
+    The average is over every film whose rating has been read rather than over
+    the watch items as they stand: ratings are only ever read for the films the
+    watch items hold, and a film that has since left one is a film Letterboxd
+    rated like any other for the purpose of having something to weigh against.
+
+    Empty when no sync instance holds a database yet, which the page reports as
+    a list nothing is known about rather than as an error.
+    """
+    if not context.sync_instance:
+        return FilmRatings({}, None)
+
+    try:
+        by_slug = context.sync_instance.db.get_film_stats()
+    except Exception as e:
+        logger.error(f"Error reading the stored film ratings: {e}")
+        return FilmRatings({}, None)
+
+    rated = [film["rating"] for film in by_slug.values() if film["rating"] is not None]
+    return FilmRatings(by_slug, sum(rated) / len(rated) if rated else None)
+
+
+def watch_item_ratings(movies: Optional[List[Dict]], ratings: FilmRatings) -> Dict:
+    """How Letterboxd's members rate what a watch item holds
+
+    rating is the plain average over the films of the list that have one;
+    weighted_rating is that average pulled towards the average across every
+    watch item by the films the list does not have, so that a three-film list
+    has to be far better than a long one to be ordered above it; popularity is
+    how many ratings its films have drawn between them.
+
+    All three are None until some film of the list has been rated, which covers
+    a list never read, a list of nothing but unreleased films, and a list whose
+    ratings the refresher has not worked through yet. Films with no rating are
+    left out rather than counted as zero: an unreleased film nobody has rated
+    says nothing about the list it is on.
+    """
+    rated = [
+        ratings.by_slug[movie["letterboxd_slug"]]
+        for movie in (movies or [])
+        if ratings.by_slug.get(movie["letterboxd_slug"], {}).get("rating") is not None
+    ]
+
+    if not rated:
+        return {"rating": None, "weighted_rating": None, "popularity": None, "rated": 0}
+
+    count = len(rated)
+    rating = sum(film["rating"] for film in rated) / count
+
+    weighted = rating
+    if ratings.mean is not None:
+        weighted = ((count * rating + RATING_PRIOR_FILMS * ratings.mean)
+                    / (count + RATING_PRIOR_FILMS))
+
+    # The geometric mean, not the plain one: rating counts run from a few
+    # hundred to a few million, so an average of them is decided by whichever
+    # one film everyone has seen and says nothing about the rest of the list.
+    counts = [film["rating_count"] for film in rated if film["rating_count"] > 0]
+    popularity = (
+        10 ** (sum(math.log10(count) for count in counts) / len(counts))
+        if counts else None
+    )
+
+    return {
+        "rating": round(rating, 2),
+        "weighted_rating": round(weighted, 2),
+        "popularity": round(popularity) if popularity is not None else None,
+        "rated": count
     }
 
 
@@ -537,9 +643,12 @@ def get_all_watch_item_progress(current_user: dict = Depends(context.get_current
 
     try:
         watched_slugs = get_watched_slugs()
+        ratings = get_film_ratings()
         return {
             "items": [
-                watch_item_progress(item_id, get_stored_categorised_movies(item_id), watched_slugs)
+                watch_item_progress(
+                    item_id, get_stored_categorised_movies(item_id), watched_slugs, ratings
+                )
                 for item_id in range(len(context.current_config.letterboxd.watch))
             ]
         }
@@ -561,7 +670,8 @@ def get_watch_item_progress(item_id: int, current_user: dict = Depends(context.g
 
     try:
         return watch_item_progress(
-            item_id, get_stored_categorised_movies(item_id), get_watched_slugs()
+            item_id, get_stored_categorised_movies(item_id), get_watched_slugs(),
+            get_film_ratings()
         )
 
     except Exception as e:

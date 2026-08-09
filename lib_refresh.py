@@ -8,6 +8,13 @@ listing is only replaced once its replacement has been read in full.
 Release dates are read here too, but on their own terms: a listing is one page
 per hundred films and a release table is one page per film, so only the films
 still waiting to be released are read, and far less often than the lists are.
+
+Ratings are read the same way, and for the same reason: Letterboxd puts neither
+an average nor a rating count on a listing page, so there is no reading them a
+hundred at a time. What makes that affordable is that a rating belongs to the
+film rather than to the list it was found through, so the backlog is the films
+watched rather than the places they appear, and an average over thousands of
+ratings is still the same average a month later.
 """
 
 import time
@@ -28,6 +35,19 @@ RELEASE_MAX_AGE = 12 * 3600
 # that follow, which is why the count left over is logged rather than passed
 # over in silence.
 RELEASE_READS_PER_ROUND = 100
+
+# How old a film's ratings may be before they are read again. An average over
+# thousands of ratings moves in the third decimal over a month, and what the
+# watch items page does with it is order lists that are hundreds of films apart:
+# reading these on the release dates' twelve hours would be a page per film per
+# half-day to watch a number not move.
+STATS_MAX_AGE = 30 * 86400
+
+# How many ratings one round will read, on the same terms as the release tables
+# above. Unlike those, this backlog is every film on every list rather than the
+# few still waiting to come out, so the first rounds after a database is created
+# work through it a hundred at a time over a few days.
+STATS_READS_PER_ROUND = 100
 
 
 class UpcomingCandidates(NamedTuple):
@@ -206,6 +226,93 @@ class ListRefresher:
             read += 1
 
         self.logger.info(f"Release dates: {read} film(s) read, {failed} failed")
+        return {'read': read, 'failed': failed, 'left': left, 'candidates': len(candidates)}
+
+    def stats_candidates(self) -> List[Dict]:
+        """Every film the watch items hold, by slug
+
+        Unlike the upcoming candidates above this is all of them, not only the
+        recent ones: what the ratings are for is ordering whole lists, and a
+        list whose older half went unread would be ordered on its newer half.
+
+        Read from the stored listings alone, so this never crawls. A film on
+        several lists is one candidate: a rating belongs to the film, which is
+        what keeps this the few thousand films watched rather than the far
+        larger number of places they appear.
+        """
+        candidates: Dict[str, Dict] = {}
+
+        for watch_item in self.config.letterboxd.watch:
+            movies = self.scraper.get_stored_list(watch_item, self.config.letterboxd.filters)
+            if movies is None:
+                continue
+
+            for movie in movies:
+                candidates.setdefault(movie['letterboxd_slug'], {
+                    'letterboxd_slug': movie['letterboxd_slug'],
+                    'title': movie['title'],
+                    'year': movie.get('year')
+                })
+
+        return list(candidates.values())
+
+    def refresh_stats(self, max_age: Optional[float] = STATS_MAX_AGE) -> Dict:
+        """Read how Letterboxd's members rated every film the watch items hold
+
+        A film read more recently than max_age is left alone, so a round costs
+        nothing once the backlog is through. One film that fails is one film
+        without a rating until the next round, not a round that stopped.
+        """
+        candidates = self.stats_candidates()
+        read_at = self.db.get_stats_reads()
+        now = time.time()
+
+        due = [
+            candidate for candidate in candidates
+            if max_age is None
+            or candidate['letterboxd_slug'] not in read_at
+            or now - read_at[candidate['letterboxd_slug']] >= max_age
+        ]
+
+        # Longest unread first, on the same reasoning as the release tables: the
+        # films nothing is known about lead, and a film at the back of the
+        # configured order still comes round rather than never being reached
+        due.sort(key=lambda candidate: read_at.get(candidate['letterboxd_slug'], 0))
+
+        if not due:
+            self.logger.debug(f"Ratings are current for all {len(candidates)} film(s)")
+            return {'read': 0, 'failed': 0, 'left': 0, 'candidates': len(candidates)}
+
+        left = max(0, len(due) - STATS_READS_PER_ROUND)
+        self.logger.info(
+            f"Reading ratings for {len(due) - left} of {len(candidates)} film(s)"
+            + (f", {left} left for the next round" if left else "")
+        )
+
+        read = 0
+        failed = 0
+        for index, candidate in enumerate(due[:STATS_READS_PER_ROUND]):
+            # Between every pair of pages, whether or not the last one worked,
+            # for the reason the release tables above wait
+            if index:
+                time.sleep(1)
+
+            try:
+                stats = self.scraper.get_film_stats(candidate['letterboxd_slug'])
+            except Exception as e:
+                stats = None
+                self.logger.error(
+                    f"Error reading the ratings of {candidate['letterboxd_slug']}: {e}"
+                )
+
+            if stats is None:
+                failed += 1
+                continue
+
+            self.db.save_film_stats(candidate, stats)
+            read += 1
+
+        self.logger.info(f"Ratings: {read} film(s) read, {failed} failed")
         return {'read': read, 'failed': failed, 'left': left, 'candidates': len(candidates)}
 
     def _refresh_watched(self, max_age: Optional[float]) -> bool:

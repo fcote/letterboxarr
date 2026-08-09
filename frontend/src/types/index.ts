@@ -113,6 +113,11 @@ export interface Movie {
   category?: MovieCategory;
   // null when no Letterboxd profile is configured, so watched status is unknown
   watched?: boolean | null;
+  // What Letterboxd's members rate the film, and how many of them did. Null
+  // until the film's turn in the background rounds has come, and for a film
+  // nobody has rated yet — anything unreleased, most of the time.
+  rating?: number | null;
+  rating_count?: number | null;
 }
 
 export interface WatchItemMovies {
@@ -137,6 +142,24 @@ export interface CategoryProgress {
   watched: number | null;
 }
 
+// How Letterboxd's members rate what a list holds. Every figure is null until
+// some film of the list has been rated: a list never read, a list of nothing
+// but unreleased films, and a list whose ratings have not been read yet all
+// look the same here, and all sort last.
+export interface WatchItemRatings {
+  // Plain average over the films of the list that have a rating
+  rating: number | null;
+  // The same average pulled towards the average across every watch item by the
+  // films the list does not have, so a three-film list has to be far better
+  // than a long one to be ordered above it
+  weighted_rating: number | null;
+  // How many ratings the films of the list have drawn between them, as a
+  // geometric mean: counts run from hundreds to millions
+  popularity: number | null;
+  // How many films of the list carry a rating, which the three above are over
+  rated: number;
+}
+
 export interface WatchItemProgress {
   item_id: number;
   // False until the list has been read from Letterboxd at least once, in which
@@ -145,6 +168,7 @@ export interface WatchItemProgress {
   total: number;
   watched: number | null;
   categories: CategoryProgress[];
+  ratings: WatchItemRatings;
 }
 
 export interface UpcomingRelease {

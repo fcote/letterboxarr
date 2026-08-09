@@ -4,6 +4,7 @@ import { moviesAPI, watchItemsAPI } from '../utils/api';
 import { WatchItemMovies, Movie } from '../types';
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
+import Tooltip from '../components/Tooltip';
 import { ProgressTrack } from '../components/CategoryProgress';
 import { MOVIE_CATEGORIES } from '../utils/categories';
 import { relativeTime } from '../utils/time';
@@ -144,6 +145,33 @@ const MoviesPage: React.FC = () => {
     })
     .filter(section => section.movies.length > 0);
 
+  // What Letterboxd's members make of the film, next to its title. Nothing at
+  // all when there is no rating: that is every unreleased film and every film
+  // the background rounds have not reached yet, and a placeholder on those
+  // rows would say "unrated" about films that are merely unread.
+  const renderRating = (movie: Movie) => {
+    if (movie.rating == null) {
+      return null;
+    }
+
+    return (
+      <Tooltip
+        lines={[
+          `${movie.rating.toFixed(2)} average on Letterboxd`,
+          movie.rating_count
+            ? `From ${movie.rating_count.toLocaleString()} member ratings.`
+            : null
+        ]}
+        focusable={false}
+        className="inline-flex"
+      >
+        <span className="whitespace-nowrap text-xs font-normal text-dark-text-muted">
+          ★ {movie.rating.toFixed(1)}
+        </span>
+      </Tooltip>
+    );
+  };
+
   const renderMovie = (movie: Movie, key: React.Key, Icon: React.ComponentType<React.ComponentProps<'svg'>>) => {
     const movieKey = `${movie.title}_${movie.year}`;
 
@@ -153,8 +181,9 @@ const MoviesPage: React.FC = () => {
           <div className="flex items-center">
             <Icon className="h-5 w-5 text-dark-text-muted mr-3" />
             <div>
-              <p className="text-sm font-medium text-dark-text-primary">
-                {movie.title}{movie.year ? ` (${movie.year})` : ''}
+              <p className="flex items-baseline gap-2 text-sm font-medium text-dark-text-primary">
+                <span>{movie.title}{movie.year ? ` (${movie.year})` : ''}</span>
+                {renderRating(movie)}
               </p>
               {movie.letterboxd_url && (
                 <p className="text-sm text-dark-text-muted">

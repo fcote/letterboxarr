@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { watchItemsAPI, letterboxdAPI } from '../utils/api';
-import { WatchItem, WatchItemProgress, LetterboxdTestResult } from '../types';
+import { WatchItem, WatchItemProgress, WatchItemRatings, LetterboxdTestResult } from '../types';
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
 import CategoryRings from '../components/CategoryProgress';
@@ -25,7 +25,8 @@ import {
 // together; a single item goes back to 'loading' while it is refreshed on its own
 type ProgressState = WatchItemProgress | 'loading' | 'error';
 
-type SortKey = 'config' | 'path' | 'least-watched' | 'most-watched' | 'largest' | 'stalest';
+type SortKey = 'config' | 'path' | 'least-watched' | 'most-watched' | 'largest' | 'stalest'
+  | 'best-rated' | 'best-weighted' | 'most-popular';
 
 const SORTS: [SortKey, string][] = [
   ['config', 'Configured order'],
@@ -33,6 +34,9 @@ const SORTS: [SortKey, string][] = [
   ['least-watched', 'Least watched'],
   ['most-watched', 'Most watched'],
   ['largest', 'Most movies'],
+  ['best-rated', 'Best rated'],
+  ['best-weighted', 'Best rated (weighted)'],
+  ['most-popular', 'Most popular'],
   ['stalest', 'Least recently read']
 ];
 
@@ -163,6 +167,14 @@ const WatchItemsPage: React.FC = () => {
     return state.watched / state.total;
   };
 
+  // How Letterboxd rates a list, null until some film of it has been rated. The
+  // ratings are read a film at a time in the background, so a list that has
+  // just been added has none for a while after its listing is in.
+  const ratingsOf = (item: WatchItem): WatchItemRatings | null => {
+    const state = progressOf(item);
+    return state?.ratings?.rating != null ? state.ratings : null;
+  };
+
   // What a row cannot show on one line: the Letterboxd name, whether it auto-adds,
   // its tags, and when it was last read. Searching matches the name and the tags
   // and one sort goes by the read date, so all of them belong here to explain a row
@@ -240,6 +252,44 @@ const WatchItemsPage: React.FC = () => {
           {state.watched}/{state.total} watched
         </span>
       </span>
+    );
+  };
+
+  // The list's average on the row, with what it is over and what it weighs
+  // against on the hover: the row has space for one number, and the average on
+  // its own would be read as a verdict on a three-film list as much as on an
+  // eighty-film one. Nothing is shown at all until some film has been rated,
+  // rather than a placeholder on every row of a database still filling up.
+  const renderRating = (item: WatchItem) => {
+    const ratings = ratingsOf(item);
+
+    if (!ratings || ratings.rating === null) {
+      return null;
+    }
+
+    const lines = [
+      `${ratings.rating.toFixed(2)} average on Letterboxd`,
+      ratings.rated === 1
+        ? 'Over the one film of this list that has been rated.'
+        : `Over the ${ratings.rated} films of this list that have been rated.`
+    ];
+
+    if (ratings.weighted_rating !== null) {
+      lines.push(`${ratings.weighted_rating.toFixed(2)} weighted, which pulls a short `
+        + 'list towards the average across all your lists.');
+    }
+
+    if (ratings.popularity !== null) {
+      lines.push(`Its films have ${ratings.popularity.toLocaleString()} ratings each, `
+        + 'typically.');
+    }
+
+    return (
+      <Tooltip lines={lines} focusable={false} className="inline-flex">
+        <span className="whitespace-nowrap text-dark-text-muted">
+          ★ {ratings.rating.toFixed(1)}
+        </span>
+      </Tooltip>
     );
   };
 
@@ -455,6 +505,18 @@ const WatchItemsPage: React.FC = () => {
         return sorted.sort((a, b) => compareWithUnknownLast(
           progressOf(a)?.total ?? null, progressOf(b)?.total ?? null, -1
         ));
+      case 'best-rated':
+        return sorted.sort((a, b) => compareWithUnknownLast(
+          ratingsOf(a)?.rating ?? null, ratingsOf(b)?.rating ?? null, -1
+        ));
+      case 'best-weighted':
+        return sorted.sort((a, b) => compareWithUnknownLast(
+          ratingsOf(a)?.weighted_rating ?? null, ratingsOf(b)?.weighted_rating ?? null, -1
+        ));
+      case 'most-popular':
+        return sorted.sort((a, b) => compareWithUnknownLast(
+          ratingsOf(a)?.popularity ?? null, ratingsOf(b)?.popularity ?? null, -1
+        ));
       case 'stalest':
         // Never read is as out of date as a list gets, so those lead
         return sorted.sort((a, b) => (a.last_refreshed ?? 0) - (b.last_refreshed ?? 0));
@@ -466,6 +528,13 @@ const WatchItemsPage: React.FC = () => {
   const visibleItems = sortItems(
     watchItems.filter(item => matchesSearch(item) && matchesFilters(item))
   );
+
+  // Ordered on ratings none of the visible lists have yet, so the order on
+  // screen is the one it started in and nothing says why
+  const ratingSortPending =
+    (sort === 'best-rated' || sort === 'best-weighted' || sort === 'most-popular')
+    && visibleItems.length > 0
+    && visibleItems.every(item => ratingsOf(item) === null);
 
   return (
     <Layout>
@@ -866,6 +935,17 @@ const WatchItemsPage: React.FC = () => {
           </div>
         )}
 
+        {/* Ratings are read a film at a time in the background, so the three
+            sorts that go by them do nothing at all on a database that has not
+            got to any of the lists on screen yet. Without this that reads as a
+            sort that does not work rather than as one waiting on a read. */}
+        {ratingSortPending && (
+          <p className="mt-2 text-xs text-dark-text-muted">
+            None of these lists have their Letterboxd ratings yet. They are read in the
+            background, a few hundred films at a time, and this order fills in as they arrive.
+          </p>
+        )}
+
         {/* Watch Items List */}
         <div className="mt-6">
           {watchItems.length === 0 ? (
@@ -915,6 +995,7 @@ const WatchItemsPage: React.FC = () => {
                         </p>
                       </div>
                       <div className="flex flex-shrink-0 items-center gap-3 text-xs">
+                        {renderRating(item)}
                         {renderProgress(item)}
                       </div>
                       <div className="flex flex-shrink-0 items-center space-x-2">

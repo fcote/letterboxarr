@@ -741,6 +741,64 @@ class LetterboxdScraper:
 
         return releases
 
+    def get_film_stats(self, letterboxd_slug: str) -> Optional[Dict]:
+        """How Letterboxd's members rated a film: its average and how many rated it
+
+        Read from the rating histogram Letterboxd loads into the film page's
+        sidebar, not from the page itself: the fragment is a few kilobytes
+        against the page's few hundred, and it carries both numbers in the one
+        line the average is captioned with. A listing page carries neither, so
+        there is no way to read these a hundred at a time.
+
+        None means the fragment could not be read and nothing should be stored;
+        a rating of None with no ratings means it was read and nobody has rated
+        the film yet, which is the ordinary answer for anything unreleased and
+        is worth remembering so it is not asked again on the next round.
+        """
+        url = f"https://letterboxd.com/csi/film/{letterboxd_slug}/rating-histogram/"
+        try:
+            with self.crawl_lock:
+                response = self._get(url)
+        except requests.RequestsError as e:
+            # A histogram Letterboxd has nothing to draw counts as read rather
+            # than as a failure: a film with no ratings would otherwise be asked
+            # for again on every round for as long as it stayed unrated, which
+            # is every round between a film joining a list and coming out
+            status = getattr(e.response, 'status_code', None)
+            if status == 404:
+                return {'rating': None, 'rating_count': 0}
+
+            self.logger.warning(f"Error reading the ratings of {letterboxd_slug}: {e}")
+            return None
+
+        soup = BeautifulSoup(response.content, 'html.parser')
+        return self._extract_film_stats(soup)
+
+    @staticmethod
+    def _extract_film_stats(soup) -> Dict:
+        """Read a rating histogram's average and rating count
+
+        Both come off the caption of the link the average is shown as, which
+        reads "Weighted average of 4.32 based on 1,254,553 ratings". The average
+        the link itself shows is rounded to one decimal, and the histogram's own
+        bars are captioned with percentages that only add up to the total when
+        every bar happens to round the same way, so neither is read instead.
+        """
+        average = soup.find('a', class_='averagerating')
+        caption = average.get('title') if average else None
+
+        match = re.search(r'([\d.]+)\D+([\d,]+)\s+ratings?', caption) if caption else None
+        if not match:
+            return {'rating': None, 'rating_count': 0}
+
+        try:
+            return {
+                'rating': float(match.group(1)),
+                'rating_count': int(match.group(2).replace(',', ''))
+            }
+        except ValueError:
+            return {'rating': None, 'rating_count': 0}
+
     @staticmethod
     def _parse_release_date(text: str) -> Optional[str]:
         """"17 Dec 2025" as an ISO date, None for anything else

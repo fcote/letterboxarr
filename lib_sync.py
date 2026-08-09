@@ -55,9 +55,9 @@ class LetterboxarrSync:
         lists may still hold movies the last round did not get to.
 
         The release dates of the films still waiting to come out are read last,
-        after Radarr has been handed everything: they are a page per film, and a
-        film reaching Radarr today is worth more than a date being one round
-        older than it had to be.
+        after Radarr has been handed everything, and the ratings after those:
+        both are a page per film, and a film reaching Radarr today is worth more
+        than a date or an average being one round older than it had to be.
 
         The run is recorded around all of it, which is what makes "a sync is
         in progress" mean the whole round to everything watching it.
@@ -81,6 +81,10 @@ class LetterboxarrSync:
                     self.refresher.refresh_releases()
                 except Exception as e:
                     self.logger.error(f"Error refreshing the release dates: {e}")
+                try:
+                    self.refresher.refresh_stats()
+                except Exception as e:
+                    self.logger.error(f"Error refreshing the ratings: {e}")
         except Exception as e:
             error = str(e)
             raise

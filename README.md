@@ -25,6 +25,7 @@ Automatically sync your Letterboxd lists to your Radarr instance. This script pe
 - 📅 Upcoming tab listing what your lists are still waiting on, by release date in your country
 - 👁️ Flags the films you have already watched on your Letterboxd profile
 - 📊 Per-category watched progress on each watch item
+- ⭐ Reads how Letterboxd rates each film, so watch items sort by rating, by rating weighted against how many films they hold, and by popularity
 - 🔄 Per-list refresh button to re-read a list from Letterboxd ahead of its next scheduled refresh
 - ⚙️ YAML configuration file support
 - 🌐 Web interface for configuration and monitoring

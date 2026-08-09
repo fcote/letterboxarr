@@ -94,6 +94,17 @@ CREATE TABLE IF NOT EXISTS film_release_reads (
     read_at REAL NOT NULL
 );
 
+-- How Letterboxd's members rated a film. rating is null and rating_count zero
+-- for a film nobody has rated yet, which is a read like any other: read_at
+-- lives on the row rather than in a table of its own, unlike the release reads
+-- above, because a film's ratings are the one row this is.
+CREATE TABLE IF NOT EXISTS film_stats (
+    slug         TEXT PRIMARY KEY REFERENCES films(slug) ON DELETE CASCADE,
+    rating       REAL,
+    rating_count INTEGER NOT NULL,
+    read_at      REAL NOT NULL
+);
+
 -- Movies handed to Radarr. movie_id is the historical "<title>_<year>" key;
 -- slug is null for rows imported from processed_movies.json.
 CREATE TABLE IF NOT EXISTS added_movies (
@@ -446,6 +457,55 @@ class Database:
                 )
         except sqlite3.Error as e:
             self.logger.warning(f"Error storing the release dates of {slug}: {e}")
+
+    # -- Film ratings -----------------------------------------------------
+
+    def get_film_stats(self) -> Dict[str, Dict]:
+        """Every stored rating, by film slug
+
+        Read whole rather than a film at a time: ratings are only ever read for
+        the films the watch items hold, so this is the few thousand rows the
+        watch items page is about to aggregate over anyway.
+        """
+        with self.lock:
+            rows = self.connection.execute(
+                "SELECT slug, rating, rating_count FROM film_stats"
+            ).fetchall()
+
+        return {
+            row['slug']: {'rating': row['rating'], 'rating_count': row['rating_count']}
+            for row in rows
+        }
+
+    def get_stats_reads(self) -> Dict[str, float]:
+        """When each film's ratings were last read, by slug"""
+        with self.lock:
+            rows = self.connection.execute("SELECT slug, read_at FROM film_stats").fetchall()
+
+        return {row['slug']: row['read_at'] for row in rows}
+
+    def save_film_stats(self, movie: Dict, stats: Dict) -> None:
+        """Store the ratings just read for a film, replacing the previous ones
+
+        Called with no rating when nobody has rated the film yet, which still
+        counts as read: an unreleased film is exactly what this has to remember
+        so as not to ask again on the next round.
+        """
+        slug = movie['letterboxd_slug']
+        try:
+            with self.lock, self.connection:
+                self._upsert_films([movie])
+                self.connection.execute(
+                    """INSERT INTO film_stats (slug, rating, rating_count, read_at)
+                       VALUES (?, ?, ?, ?)
+                       ON CONFLICT(slug) DO UPDATE SET
+                           rating       = excluded.rating,
+                           rating_count = excluded.rating_count,
+                           read_at      = excluded.read_at""",
+                    (slug, stats.get('rating'), stats.get('rating_count') or 0, time.time())
+                )
+        except sqlite3.Error as e:
+            self.logger.warning(f"Error storing the ratings of {slug}: {e}")
 
     # -- Added movies -----------------------------------------------------
 
