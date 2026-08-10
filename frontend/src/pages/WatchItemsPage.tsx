@@ -267,21 +267,33 @@ const WatchItemsPage: React.FC = () => {
       return null;
     }
 
+    // Said in this order, and with the popularity line marked off as its own
+    // thing, because four numbers in one bubble read as four inputs to the last
+    // of them: neither figure below is worked out from how many ratings a film
+    // has drawn, and an unrated film is left out rather than counted as a zero.
+    const total = progressOf(item)?.total;
+    const unrated = total === undefined ? 0 : total - ratings.rated;
+
     const lines = [
       `${ratings.rating.toFixed(2)} average on Letterboxd`,
       ratings.rated === 1
-        ? 'Over the one film of this list that has been rated.'
-        : `Over the ${ratings.rated} films of this list that have been rated.`
+        ? 'Over the one film of this list that members have rated.'
+        : `Over the ${ratings.rated} films of this list that members have rated.`,
+      unrated > 0
+        ? `The other ${unrated} carry no rating yet and are left out, not counted as zero.`
+        : null
     ];
 
     if (ratings.weighted_rating !== null) {
-      lines.push(`${ratings.weighted_rating.toFixed(2)} weighted, which pulls a short `
-        + 'list towards the average across all your lists.');
+      lines.push(`${ratings.weighted_rating.toFixed(2)} weighted — that average and how `
+        + 'many films it is over, and nothing else: short lists are pulled towards the '
+        + 'average across all your lists, long filmographies are credited for their size.');
     }
 
     if (ratings.popularity !== null) {
-      lines.push(`Its films have ${ratings.popularity.toLocaleString()} ratings each, `
-        + 'typically.');
+      lines.push(`Separately: its rated films have drawn ${ratings.popularity.toLocaleString()} `
+        + 'ratings each, typically. That orders the popularity sort alone and has no part '
+        + 'in either figure above.');
     }
 
     return (

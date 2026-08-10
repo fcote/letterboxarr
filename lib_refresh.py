@@ -44,10 +44,11 @@ RELEASE_READS_PER_ROUND = 100
 STATS_MAX_AGE = 30 * 86400
 
 # How many ratings one round will read, on the same terms as the release tables
-# above. Unlike those, this backlog is every film on every list rather than the
-# few still waiting to come out, so the first rounds after a database is created
-# work through it a hundred at a time over a few days.
-STATS_READS_PER_ROUND = 100
+# above. Set far higher than those because this backlog is every film on every
+# list rather than the few still waiting to come out: at a page a second it puts
+# eight minutes on the end of a round, which is worth it to have a new watch
+# list's ratings within a couple of rounds instead of over two days.
+STATS_READS_PER_ROUND = 500
 
 
 class UpcomingCandidates(NamedTuple):

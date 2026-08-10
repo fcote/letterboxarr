@@ -468,6 +468,21 @@ def watch_item_progress(item_id: int, movies: Optional[List[Dict]],
 # and eighty carry nearly all of it.
 RATING_PRIOR_FILMS = 10
 
+# What a large body of work is worth on top of that, in rating points, and how
+# many rated films earn half of it. Weighing a short list towards the middle
+# only stops it running away with a high average; on its own it leaves a
+# director of five good films above a director of sixty nearly as good ones,
+# which is not how a watch list is worth ranking. So size is paid for outright,
+# on a curve that flattens: the fortieth film a director made counts for far
+# less than the fifth, and no filmography can buy more than the premium.
+#
+# Counted over the films whose ratings have been read, not the whole list. They
+# are the same thing once the background rounds are through, and until they are,
+# crediting a director for films nothing is known about would put a list of
+# eighty with one rating among the best on the strength of that one.
+RATING_SIZE_PREMIUM = 0.30
+RATING_SIZE_MIDPOINT = 25
+
 
 class FilmRatings(NamedTuple):
     """The stored ratings, and the average across all of them to weigh against
@@ -507,11 +522,16 @@ def get_film_ratings() -> FilmRatings:
 def watch_item_ratings(movies: Optional[List[Dict]], ratings: FilmRatings) -> Dict:
     """How Letterboxd's members rate what a watch item holds
 
-    rating is the plain average over the films of the list that have one;
+    rating is the plain average over the films of the list that have one.
+
     weighted_rating is that average pulled towards the average across every
-    watch item by the films the list does not have, so that a three-film list
-    has to be far better than a long one to be ordered above it; popularity is
-    how many ratings its films have drawn between them.
+    watch item by the films the list does not have, and then paid for the films
+    it does: a long filmography is worth ranking above a short one that merely
+    averages a little higher, so both a thin sample and a small body of work
+    cost a list its place. It is no longer a rating but a score, and it can sit
+    above the plain average — a director of sixty is meant to gain by it.
+
+    popularity is how many ratings its films have drawn between them.
 
     All three are None until some film of the list has been rated, which covers
     a list never read, a list of nothing but unreleased films, and a list whose
@@ -535,6 +555,7 @@ def watch_item_ratings(movies: Optional[List[Dict]], ratings: FilmRatings) -> Di
     if ratings.mean is not None:
         weighted = ((count * rating + RATING_PRIOR_FILMS * ratings.mean)
                     / (count + RATING_PRIOR_FILMS))
+    weighted += RATING_SIZE_PREMIUM * count / (count + RATING_SIZE_MIDPOINT)
 
     # The geometric mean, not the plain one: rating counts run from a few
     # hundred to a few million, so an average of them is decided by whichever
