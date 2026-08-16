@@ -5,7 +5,7 @@ import hashlib
 from datetime import date
 from threading import RLock
 from typing import Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
-from urllib.parse import urljoin
+from urllib.parse import urlsplit, urlunsplit
 
 from curl_cffi import requests
 from bs4 import BeautifulSoup
@@ -47,6 +47,14 @@ MONTHS = {
     'Jul': 7, 'Aug': 8, 'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
 }
 
+# A watch item is normally given the path that follows letterboxd.com, but a
+# whole link is taken as it stands. A private list shared "with anyone" is only
+# reachable through the secret boxd.it link Letterboxd hands out for it: its
+# ordinary /<member>/list/<slug>/ URL answers 404 to everyone but its owner, so
+# there is no path to type in the link's place.
+LINK_HOSTS = r'(?:www\.)?letterboxd\.com|boxd\.it'
+LINK = re.compile(rf'^(?:https?://)?({LINK_HOSTS})(/.*)?$', re.IGNORECASE)
+
 # Browser fingerprints to impersonate, tried in order. Letterboxd's bot
 # protection refuses some of them on member pages (a 403 on
 # /<user>/films/page/2/ while page 1 answers fine), and which ones are refused
@@ -62,6 +70,17 @@ class ListPage(NamedTuple):
     """
     movies: List[Dict]
     name: Optional[str] = None
+
+
+class ListingUnavailable(Exception):
+    """A page of a listing could not be read, so what came back is not the listing
+
+    Raised rather than swallowed so nothing downstream mistakes a refused or
+    missing page for a short answer: none of a listing looks exactly like a list
+    that was emptied, and half of one looks like the rest of the films leaving
+    it. Both used to be stored, and reported to the screen as a perfectly good
+    list that happened to be that size.
+    """
 
 
 class LetterboxdScraper:
@@ -107,8 +126,15 @@ class LetterboxdScraper:
                 continue
 
             self.logger.info(f"Processing watch list: {watch_item.path}")
-            movies = self.get_movies_from_path(watch_item, global_filters)
-            
+            try:
+                movies = self.get_movies_from_path(watch_item, global_filters)
+            except ListingUnavailable as e:
+                # One list Letterboxd will not give up costs that list its films,
+                # not the whole sync: the others still have theirs to hand over
+                self.logger.error(f"Skipping watch list {watch_item.path}: {e}")
+                continue
+
+
             # Add tags and auto_add flag to movies
             for movie in movies:
                 movie['tags'] = watch_item.tags.copy()
@@ -154,6 +180,64 @@ class LetterboxdScraper:
         response.raise_for_status()
         return response
 
+    @staticmethod
+    def _is_link(path: str) -> bool:
+        """Whether a watch item was given a whole link rather than a path"""
+        return LINK.match(path.strip()) is not None
+
+    @staticmethod
+    def _listing_url(path: str) -> str:
+        """The URL a watch item path names
+
+        A path is what follows letterboxd.com, which is what the configuration
+        screen asks for; a whole link is kept as it is, scheme filled in when it
+        was pasted without one. Both letterboxd.com and the boxd.it shortener
+        count as links, the latter being the only address a privately shared
+        list has.
+        """
+        path = path.strip()
+
+        link = LINK.match(path)
+        if link:
+            host, rest = link.group(1), link.group(2) or '/'
+            return f"https://{host}{rest}"
+
+        return f"https://letterboxd.com/{path.strip('/')}/"
+
+    @staticmethod
+    def _page_url(url: str, page: int) -> str:
+        """The nth page of a listing, keeping whatever else the URL carries
+
+        The page number joins the path, ahead of the query rather than after it:
+        a secret share link may hold its key there, and hanging 'page/2/' off
+        the end of the whole thing would ask Letterboxd for a page of the key.
+        """
+        parts = urlsplit(url)
+        path = parts.path if parts.path.endswith('/') else f"{parts.path}/"
+        return urlunsplit(parts._replace(path=f"{path}page/{page}/"))
+
+    @staticmethod
+    def _unavailable(page_url: str, error: Exception) -> ListingUnavailable:
+        """Why a page could not be read, said in terms of what Letterboxd answered
+
+        A 404 is worth spelling out: the two things it means are a path that is
+        misspelt and a list only its owner can see, and neither is something the
+        crawl can work out on its own.
+        """
+        response = getattr(error, 'response', None)
+        status = getattr(response, 'status_code', None)
+
+        if status == 404:
+            reason = "Letterboxd has no such page — check the path, or the list may be private"
+        elif status == 403:
+            reason = "Letterboxd refused the request"
+        elif status is not None:
+            reason = f"Letterboxd answered {status}"
+        else:
+            reason = f"Letterboxd could not be reached ({error})"
+
+        return ListingUnavailable(f"{reason}: {page_url}")
+
     def _set_film_filter(self, cookie_filters: str) -> None:
         """Set the filmFilter cookie for the next requests, dropping any previous one
 
@@ -175,6 +259,10 @@ class LetterboxdScraper:
         Never re-reads a listing it already has, however old: keeping it current
         is the refresher's job, so browsing the movies page answers from the
         database instead of waiting minutes on a crawl.
+
+        Raises ListingUnavailable when there is nothing stored and Letterboxd
+        will not give the path up either — a path that is misspelt or private
+        has no listing to answer with, and an empty one is not the same answer.
         """
         list_key = self._list_key(watch_item, global_filters)
 
@@ -198,8 +286,11 @@ class LetterboxdScraper:
 
         A listing read more recently than max_age is left alone, which is what
         stops a restart from crawling everything again. Returns whether the
-        stored listing was replaced, so a crawl that came back empty and left
-        the previous one in place does not count as a refresh.
+        stored listing was replaced, so a crawl that came back empty or broke
+        off and left the previous one in place does not count as a refresh.
+
+        Raises ListingUnavailable only for a path that has never been read and
+        cannot be now: once a listing is stored, a refused page leaves it be.
         """
         list_key = self._list_key(watch_item, global_filters)
 
@@ -214,13 +305,28 @@ class LetterboxdScraper:
 
     def _read_list(self, list_key: str, watch_item: WatchListItem,
                    global_filters: LetterboxdFilters) -> List[Dict]:
-        """Crawl a listing and store it, keeping what is stored if it comes back empty
+        """Crawl a listing and store it, keeping what is stored if the crawl breaks off
 
-        Must be called under the crawl lock. An empty result is far more often a
-        refused page than an emptied list, and storing it would replace a good
-        listing with nothing until the next refresh.
+        Must be called under the crawl lock. A crawl that could not read one of
+        its pages stores nothing, however many it did read: storing half a
+        listing drops every film below the refused page until the next refresh.
+        Raises when there is no stored listing to fall back on, so a path that
+        cannot be read says so rather than answering like an empty list.
+
+        An empty crawl — every page read, no film on any of them — is still kept
+        from replacing a stored listing: a page that answers 200 with nothing on
+        it is more often bot protection than a list someone emptied.
         """
-        movies, name = self._fetch_path(watch_item, global_filters)
+        try:
+            movies, name = self._fetch_path(watch_item, global_filters)
+        except ListingUnavailable as e:
+            stored = self.db.get_list(list_key)
+            if stored is None:
+                raise
+            self.logger.warning(
+                f"Could not re-read {watch_item.path}, keeping the stored listing: {e}"
+            )
+            return stored
 
         if not movies:
             stored = self.db.get_list(list_key)
@@ -239,7 +345,9 @@ class LetterboxdScraper:
         """Crawl every page of a Letterboxd path, without touching the database
 
         Returns the films and the name Letterboxd gives the path, the latter None
-        when the page did not carry one.
+        when the page did not carry one. Raises ListingUnavailable rather than
+        returning the pages it did read when one of them cannot be read: the
+        caller asked for the listing, and part of it is not it.
         """
         movies = []
         name = None
@@ -255,8 +363,12 @@ class LetterboxdScraper:
 
         Pages are only fetched as the caller asks for them, so a caller that has
         seen enough stops the crawl by walking away from the generator.
+
+        A page that cannot be read raises ListingUnavailable rather than ending
+        the crawl: ending it quietly is indistinguishable from reaching the last
+        page, which is how a refused first page came to read as an empty list.
         """
-        url = f"https://letterboxd.com/{watch_item.path}/"
+        url = self._listing_url(watch_item.path)
 
         # Set up filters as cookies if specified
         if watch_item.filters:
@@ -268,19 +380,26 @@ class LetterboxdScraper:
 
         page = 1
         while True:
-            page_url = url if page == 1 else urljoin(url, f"page/{page}/")
+            page_url = url if page == 1 else self._page_url(url, page)
             self.logger.debug(f"Fetching page {page} from {watch_item.path}")
 
             try:
                 response = self._get(page_url)
             except requests.RequestsError as e:
-                self.logger.error(f"Error fetching page {page} from {watch_item.path}: {e}")
-                return
+                raise self._unavailable(page_url, e) from e
+
+            # The pages after the first hang off wherever the first one landed,
+            # not off the link that was followed to get there: a boxd.it share
+            # link is a redirect, and a redirect has no page 2. Only the first
+            # page rebases — every later one lands on its own page/N/, and
+            # building page 3 from that would ask for page 3 of page 2
+            if page == 1:
+                url = str(response.url)
 
             soup = BeautifulSoup(response.content, 'html.parser')
 
             # Find movie posters/links
-            movie_items = soup.find_all('div', attrs={'data-component-class': 'LazyPoster'})
+            movie_items = self._poster_items(soup)
 
             if not movie_items:
                 self.logger.debug(f"No more movies found on page {page} of {watch_item.path}")
@@ -359,9 +478,12 @@ class LetterboxdScraper:
                         global_filters: LetterboxdFilters) -> Tuple[List[Dict], Optional[str], bool]:
         """Crawl a listing newest first, stopping once it is past this year
 
-        Returns the films, the name Letterboxd gives the path, and whether a page
-        was read at all — an empty crawl is a list with nothing recent in it when
-        a page was read, and a refused or missing page when none was.
+        Returns the films, the name Letterboxd gives the path, and whether the
+        head of the listing was read in full — an empty crawl is a list with
+        nothing recent in it when it was, and a refused or missing page when it
+        was not. Unlike everywhere else a page that cannot be read is not an
+        error here: the browse paths refuse this sort outright, and the caller
+        answers from the whole stored listing instead.
 
         The crawl stops on the first page that holds nothing recent enough, and
         then only if something on it was dated at all. Films Letterboxd gives no
@@ -369,6 +491,12 @@ class LetterboxdScraper:
         nothing about how far down the listing the crawl has come; only a film
         with a year older than the cut-off does.
         """
+        if self._is_link(watch_item.path):
+            # A share link cannot be asked for in an order: it is a redirect,
+            # and the sort belongs to the path it redirects to. Falling back to
+            # the whole stored listing costs nothing but reading more of it
+            return [], None, False
+
         sorted_item = WatchListItem(
             path=f"{watch_item.path}/{UPCOMING_SORT}",
             filters=watch_item.filters,
@@ -380,14 +508,21 @@ class LetterboxdScraper:
         name = None
         read = False
 
-        for page in self._iter_pages(sorted_item, global_filters):
-            read = True
-            name = name or page.name
+        try:
+            for page in self._iter_pages(sorted_item, global_filters):
+                read = True
+                name = name or page.name
 
-            recent = [movie for movie in page.movies if self._can_still_release(movie)]
-            movies.extend(recent)
-            if not recent and any(movie.get('year') is not None for movie in page.movies):
-                break
+                recent = [movie for movie in page.movies if self._can_still_release(movie)]
+                movies.extend(recent)
+                if not recent and any(movie.get('year') is not None for movie in page.movies):
+                    break
+        except ListingUnavailable as e:
+            # Whatever came back before the refused page is thrown away with the
+            # rest: the caller stores this head as it stands, and a head cut
+            # short is a film silently missing from the upcoming page
+            self.logger.debug(f"Could not read {sorted_item.path}: {e}")
+            return [], None, False
 
         self.logger.info(
             f"Found {len(movies)} film(s) of this year or later in {watch_item.path}"
@@ -817,6 +952,27 @@ class LetterboxdScraper:
 
         return f"{int(year):04d}-{MONTHS[month]:02d}-{int(day):02d}"
 
+    def _poster_items(self, soup) -> List:
+        """The posters of the listing itself, leaving the ones beside it alone
+
+        Every shape of listing page puts its films in the main column and hangs
+        its panels off an <aside> next to it, and some of those panels are made
+        of posters too: a list that was cloned from another shows five posters
+        of its source under "Cloned from…", on every one of its pages. Read off
+        the whole page they joined the listing, so a cloned list came back with
+        five films that are not on it, repeated once per page, and auto-add
+        handed them to Radarr.
+
+        A page with no main column at all is read whole rather than as nothing:
+        an unfamiliar layout is better crawled loosely than reported empty.
+        """
+        main = soup.find('section', class_='col-main')
+        if main is None:
+            main = soup
+            self.logger.debug("No main column on this page, reading posters from the whole of it")
+
+        return main.find_all('div', attrs={'data-component-class': 'LazyPoster'})
+
     @staticmethod
     def _extract_list_name(soup) -> Optional[str]:
         """What Letterboxd calls the page a listing was read from
@@ -825,6 +981,11 @@ class LetterboxdScraper:
         watchlist gives "<member>'s Watchlist", a list "IMDb Top 250", a crew or
         cast page "Films directed by James Gray". The heading is only there on
         the pages built around one, so it stands in when the meta tag is missing.
+
+        The secret page of a privately shared list is the one that words it
+        differently, as "<name>, a list of films by <member>" — that being what
+        reads well on a shared card and badly as the name of a list. The suffix
+        is dropped so the list is called the same thing however it was reached.
         """
         meta = soup.find('meta', attrs={'property': 'og:title'})
         heading = soup.find('h1', class_='title-1')
@@ -832,7 +993,7 @@ class LetterboxdScraper:
         for name in (meta.get('content') if meta else None,
                      heading.get_text(' ', strip=True) if heading else None):
             if name and name.strip():
-                return name.strip()
+                return re.sub(r',\s*a list of films by \S+$', '', name.strip())
 
         return None
 

@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from lib_config import ConfigLoader, Config, WatchListItem, LetterboxdFilters
 from lib_letterboxd import (
     LetterboxdScraper,
+    ListingUnavailable,
     CATEGORY_FILM,
     CATEGORY_SHORT_FILM,
     CATEGORY_DOCUMENTARY,
@@ -343,6 +344,12 @@ def get_radarr_quality_profiles(current_user: dict = Depends(context.get_current
 
 @context.app.post("/api/test-watch-item")
 def test_letterboxd_url(request: WatchItemCreate, current_user: dict = Depends(context.get_current_user)):
+    """Whether Letterboxd will give up the films of a path, and how many
+
+    A path Letterboxd will not read comes back invalid, with what it answered:
+    it used to come back valid with no films, which reads on the screen as a
+    perfectly good empty list and leaves nothing to go on but the server log.
+    """
     try:
         # Test URL by attempting to scrape first few movies
         item = WatchListItem(
@@ -360,6 +367,9 @@ def test_letterboxd_url(request: WatchItemCreate, current_user: dict = Depends(c
             "movie_count": len(movies),
             "sample_movies": [{"title": movie["title"], "year": movie["year"]} for movie in movies[:3]]
         }
+    except ListingUnavailable as e:
+        logger.info(f"Letterboxd would not give up {request.path}: {e}")
+        return {"valid": False, "error": str(e)}
     except Exception as e:
         logger.error(f"Error testing Letterboxd URL: {e}")
         return {"valid": False, "error": str(e)}
@@ -618,6 +628,11 @@ def get_movies_by_watch_item(item_id: int, current_user: dict = Depends(context.
             "watched_count": None if watched_slugs is None else sum(1 for m in movies if m["watched"])
         }
 
+    except ListingUnavailable as e:
+        # Nothing has ever been read for this path and Letterboxd will not give
+        # it up now: say why instead of showing the list as empty
+        logger.warning(f"Could not read the listing of watch item {item_id}: {e}")
+        raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:
         logger.error(f"Error getting movies for watch item: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get movies: {str(e)}")
@@ -643,6 +658,9 @@ def refresh_watch_item(item_id: int, current_user: dict = Depends(context.get_cu
         refreshed = context.sync_instance.refresher.refresh_watch_item(watch_item)
         return {"item_id": item_id, "path": watch_item.path, "refreshed": refreshed}
 
+    except ListingUnavailable as e:
+        logger.warning(f"Could not re-read watch item {item_id}: {e}")
+        raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:
         logger.error(f"Error refreshing watch item: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to refresh watch item: {str(e)}")

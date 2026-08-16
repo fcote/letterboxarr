@@ -25,6 +25,21 @@ import {
 // together; a single item goes back to 'loading' while it is refreshed on its own
 type ProgressState = WatchItemProgress | 'loading' | 'error';
 
+// A watch item is usually the path after letterboxd.com, but a whole link is
+// taken as it stands — a privately shared list has only its secret boxd.it
+// link. The field drops its 'letterboxd.com/' prefix once one is typed, since
+// the address would read as nonsense underneath it.
+const LINK = /^(?:https?:\/\/)?(?:www\.)?(?:letterboxd\.com|boxd\.it)(\/|$)/i;
+const isLink = (path: string) => LINK.test(path.trim());
+
+const PATH_EXAMPLES = 'Examples: username/watchlist, films/popular, '
+  + 'actor/daniel-day-lewis. A private list works from the boxd.it link '
+  + 'its share menu gives you.';
+
+// How a watch item reads on screen: a path only means anything under the site
+// it belongs to, and a link already carries its own
+const asAddress = (path: string) => (isLink(path) ? path : `letterboxd.com/${path}`);
+
 type SortKey = 'config' | 'path' | 'least-watched' | 'most-watched' | 'largest' | 'stalest'
   | 'best-rated' | 'best-weighted' | 'most-popular';
 
@@ -180,7 +195,7 @@ const WatchItemsPage: React.FC = () => {
   // and one sort goes by the read date, so all of them belong here to explain a row
   // that matched or ordered on something not on screen.
   const itemSummary = (item: WatchItem): string[] => [
-    `letterboxd.com/${item.path}`,
+    asAddress(item.path),
     item.name ?? '',
     item.auto_add === false
       ? 'Auto-add off — movies are tracked but not sent to Radarr'
@@ -445,7 +460,7 @@ const WatchItemsPage: React.FC = () => {
       // Answers once the list is stored, so both of these read off the new one
       await watchItemsAPI.refresh(item.id);
       await Promise.all([loadItemProgress(item.id), reloadItemDetails(item.id)]);
-      toast.success(`letterboxd.com/${item.path} re-read from Letterboxd`);
+      toast.success(`${asAddress(item.path)} re-read from Letterboxd`);
     } catch (error: any) {
       toast.error(error.response?.data?.detail || 'Failed to refresh this watch item');
     } finally {
@@ -579,21 +594,25 @@ const WatchItemsPage: React.FC = () => {
                       Letterboxd Path
                     </label>
                     <div className="mt-1 flex rounded-md shadow-sm">
-                      <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-dark-border bg-dark-bg-tertiary text-dark-text-muted text-sm">
-                        letterboxd.com/
-                      </span>
+                      {!isLink(newItem.path) && (
+                        <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-dark-border bg-dark-bg-tertiary text-dark-text-muted text-sm">
+                          letterboxd.com/
+                        </span>
+                      )}
                       <input
                         type="text"
                         value={newItem.path}
                         onChange={(e) => setNewItem({ ...newItem, path: e.target.value })}
                         disabled={submitting}
-                        className="input-field rounded-none rounded-r-md w-full disabled:opacity-50"
+                        className={`input-field w-full disabled:opacity-50 ${
+                          isLink(newItem.path) ? 'rounded-md' : 'rounded-none rounded-r-md'
+                        }`}
                         placeholder="username/watchlist"
                         required
                       />
                     </div>
                     <p className="mt-2 text-sm text-dark-text-muted">
-                      Examples: username/watchlist, films/popular, actor/daniel-day-lewis
+                      {PATH_EXAMPLES}
                     </p>
                   </div>
 
@@ -730,21 +749,25 @@ const WatchItemsPage: React.FC = () => {
                       Letterboxd Path
                     </label>
                     <div className="mt-1 flex rounded-md shadow-sm">
-                      <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-dark-border bg-dark-bg-tertiary text-dark-text-muted text-sm">
-                        letterboxd.com/
-                      </span>
+                      {!isLink(editItem.path) && (
+                        <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-dark-border bg-dark-bg-tertiary text-dark-text-muted text-sm">
+                          letterboxd.com/
+                        </span>
+                      )}
                       <input
                         type="text"
                         value={editItem.path}
                         onChange={(e) => setEditItem({ ...editItem, path: e.target.value })}
                         disabled={editing}
-                        className="input-field rounded-none rounded-r-md w-full disabled:opacity-50"
+                        className={`input-field w-full disabled:opacity-50 ${
+                          isLink(editItem.path) ? 'rounded-md' : 'rounded-none rounded-r-md'
+                        }`}
                         placeholder="username/watchlist"
                         required
                       />
                     </div>
                     <p className="mt-2 text-sm text-dark-text-muted">
-                      Examples: username/watchlist, films/popular, actor/daniel-day-lewis
+                      {PATH_EXAMPLES}
                     </p>
                   </div>
 
@@ -1003,7 +1026,7 @@ const WatchItemsPage: React.FC = () => {
                           <InformationCircleIcon className="h-4 w-4" />
                         </Tooltip>
                         <p className="truncate text-sm font-medium text-dark-text-primary">
-                          letterboxd.com/{item.path}
+                          {asAddress(item.path)}
                         </p>
                       </div>
                       <div className="flex flex-shrink-0 items-center gap-3 text-xs">
@@ -1022,7 +1045,7 @@ const WatchItemsPage: React.FC = () => {
                         <button
                           onClick={() => handleEditClick(item)}
                           className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-dark-text-muted hover:bg-dark-bg-tertiary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-blue"
-                          aria-label={`Edit letterboxd.com/${item.path}`}
+                          aria-label={`Edit ${asAddress(item.path)}`}
                         >
                           <PencilIcon className="h-4 w-4" />
                         </button>
@@ -1030,7 +1053,7 @@ const WatchItemsPage: React.FC = () => {
                           onClick={() => handleRefresh(item)}
                           disabled={refreshing === item.id}
                           className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-dark-text-muted hover:bg-dark-bg-tertiary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-blue disabled:opacity-50 disabled:cursor-not-allowed"
-                          aria-label={`Refresh letterboxd.com/${item.path}`}
+                          aria-label={`Refresh ${asAddress(item.path)}`}
                         >
                           <ArrowPathIcon className={`h-4 w-4 ${refreshing === item.id ? 'animate-spin' : ''}`} />
                         </button>
@@ -1038,7 +1061,7 @@ const WatchItemsPage: React.FC = () => {
                           onClick={() => handleDelete(item.id!)}
                           disabled={deleting === item.id}
                           className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-red-500 hover:bg-brand-orange/10 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-orange disabled:opacity-50 disabled:cursor-not-allowed"
-                          aria-label={`Delete letterboxd.com/${item.path}`}
+                          aria-label={`Delete ${asAddress(item.path)}`}
                         >
                           {deleting === item.id ? (
                             <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-500"></div>

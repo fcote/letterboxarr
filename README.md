@@ -139,6 +139,18 @@ python main.py
 - **People**: `actor/name`, `director/name`, `writer/name`
 - **Genres**: `films/genre/horror`, `films/genre/sci-fi`
 - **Custom Lists**: Any valid Letterboxd URL path
+- **Private Lists**: The `https://boxd.it/…` link from the list's share menu
+
+A watch item is normally the path that follows `letterboxd.com`, but a whole
+link is taken as it stands. That is what a private list needs: one set to be
+shared "with anyone" is only reachable through the secret `boxd.it` link
+Letterboxd hands out for it, and its ordinary `/<member>/list/<slug>/` address
+answers 404 to everyone but its owner. A list shared only with friends needs a
+signed-in member, so it cannot be read here.
+
+A path Letterboxd will not give up — misspelt, private, or refused — is
+reported as such rather than as a list that happens to be empty, both on the
+**Test URL** button and on the list's own page.
 
 ### Tags and Filtering
 

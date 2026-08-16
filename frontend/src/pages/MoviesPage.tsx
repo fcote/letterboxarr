@@ -50,7 +50,9 @@ const MoviesPage: React.FC = () => {
       const data = await moviesAPI.getByWatchItem(id);
       setMovieData(data);
     } catch (error: any) {
-      toast.error('Failed to load movies');
+      // A list Letterboxd would not give up comes back with why, which is the
+      // difference between "check the path" and "try again later"
+      toast.error(error.response?.data?.detail || 'Failed to load movies');
     } finally {
       setLoading(false);
     }
