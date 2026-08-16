@@ -66,10 +66,13 @@ class ListPage(NamedTuple):
     """One page of a Letterboxd listing
 
     The name is only ever read off the first page, since that is the only one a
-    crawl is sure to fetch and every page of a listing carries the same one.
+    crawl is sure to fetch and every page of a listing carries the same one. So
+    is the url, which is where that page landed rather than what was asked for:
+    the later pages are built from it and would only report themselves.
     """
     movies: List[Dict]
     name: Optional[str] = None
+    url: Optional[str] = None
 
 
 class ListingUnavailable(Exception):
@@ -318,7 +321,7 @@ class LetterboxdScraper:
         it is more often bot protection than a list someone emptied.
         """
         try:
-            movies, name = self._fetch_path(watch_item, global_filters)
+            movies, name, url = self._fetch_path(watch_item, global_filters)
         except ListingUnavailable as e:
             stored = self.db.get_list(list_key)
             if stored is None:
@@ -337,26 +340,29 @@ class LetterboxdScraper:
                 return stored
             return []
 
-        self.db.save_list(list_key, watch_item.path, movies, name)
+        self.db.save_list(list_key, watch_item.path, movies, name, url)
         return movies
 
-    def _fetch_path(self, watch_item: WatchListItem,
-                    global_filters: LetterboxdFilters) -> Tuple[List[Dict], Optional[str]]:
+    def _fetch_path(self, watch_item: WatchListItem, global_filters: LetterboxdFilters
+                    ) -> Tuple[List[Dict], Optional[str], Optional[str]]:
         """Crawl every page of a Letterboxd path, without touching the database
 
-        Returns the films and the name Letterboxd gives the path, the latter None
-        when the page did not carry one. Raises ListingUnavailable rather than
-        returning the pages it did read when one of them cannot be read: the
-        caller asked for the listing, and part of it is not it.
+        Returns the films, the name Letterboxd gives the path, and the address
+        the crawl landed on — the last two None when nothing was read. Raises
+        ListingUnavailable rather than returning the pages it did read when one
+        of them cannot be read: the caller asked for the listing, and part of it
+        is not it.
         """
         movies = []
         name = None
+        url = None
         for page in self._iter_pages(watch_item, global_filters):
             movies.extend(page.movies)
             name = name or page.name
+            url = url or page.url
 
         self.logger.info(f"Found {len(movies)} movies in {watch_item.path}")
-        return movies, name
+        return movies, name, url
 
     def _iter_pages(self, watch_item: WatchListItem, global_filters: LetterboxdFilters):
         """Yield the films of a Letterboxd path one ListPage at a time
@@ -410,7 +416,8 @@ class LetterboxdScraper:
                     movie for movie in (self._extract_movie_data(item) for item in movie_items)
                     if movie
                 ],
-                name=self._extract_list_name(soup) if page == 1 else None
+                name=self._extract_list_name(soup) if page == 1 else None,
+                url=url if page == 1 else None
             )
 
             # Check if there's a next page
@@ -719,7 +726,7 @@ class LetterboxdScraper:
         watched_item = WatchListItem(path=f"{username}/films", filters=LetterboxdFilters())
         try:
             with self.crawl_lock:
-                movies, _ = self._fetch_path(watched_item, LetterboxdFilters())
+                movies, _, _ = self._fetch_path(watched_item, LetterboxdFilters())
         except Exception as e:
             if known is None:
                 raise

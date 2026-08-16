@@ -232,6 +232,9 @@ def get_watch_items(current_user: dict = Depends(context.get_current_user)):
             # items page searches on the one and sorts on the other
             "name": db.get_path_name(item.path) if db else None,
             "last_refreshed": db.get_path_fetched_at(item.path) if db else None,
+            # Where the path actually leads, so a row configured with a share
+            # link shows the list it stands for rather than the boxd.it code
+            "url": db.get_path_url(item.path) if db else None,
         }
         for i, item in enumerate(context.current_config.letterboxd.watch)
     ]
@@ -619,6 +622,9 @@ def get_movies_by_watch_item(item_id: int, current_user: dict = Depends(context.
                 "path": watch_item.path,
                 # What Letterboxd calls the list, null until a crawl has read it
                 "name": context.sync_instance.db.get_path_name(watch_item.path),
+                # Where the path leads, which is the only readable address a
+                # list configured with a boxd.it share link has
+                "url": context.sync_instance.db.get_path_url(watch_item.path),
                 "tags": watch_item.tags
             },
             "movies": movies,

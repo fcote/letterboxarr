@@ -89,6 +89,10 @@ export interface WatchItem {
   // What Letterboxd calls the list, null until a crawl has read it. Read-only:
   // it comes from the stored listing, not from anything the form sends back.
   name?: string | null;
+  // Where the path actually leads, null until a crawl has read it. Read-only,
+  // and worth showing in the path's place for a list configured with a boxd.it
+  // share link: the code says nothing, where it leads does.
+  url?: string | null;
   // When this list was last read from Letterboxd, null if it never has been
   last_refreshed?: number | null;
   tags: string[];
@@ -125,6 +129,8 @@ export interface WatchItemMovies {
     path: string;
     // What Letterboxd calls the list, null until a crawl has read it
     name?: string | null;
+    // Where the path leads, null until a crawl has read it
+    url?: string | null;
     tags: string[];
   };
   movies: Movie[];

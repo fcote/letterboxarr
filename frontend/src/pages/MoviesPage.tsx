@@ -8,6 +8,7 @@ import Tooltip from '../components/Tooltip';
 import { ProgressTrack } from '../components/CategoryProgress';
 import { MOVIE_CATEGORIES } from '../utils/categories';
 import { relativeTime } from '../utils/time';
+import { watchItemPath } from '../utils/letterboxd';
 import {
   ArrowPathIcon,
   CheckCircleIcon,
@@ -35,15 +36,17 @@ const MoviesPage: React.FC = () => {
 
   // Name the list in the tab and in the history entry by its Letterboxd path,
   // which is how the watch items page labels it too. The plain app name goes back
-  // on the way out so another page is not left under this list's title.
-  const watchItemPath = movieData?.watch_item.path;
+  // on the way out so another page is not left under this list's title. Where the
+  // list was read from rather than what was configured, so one watched through a
+  // share link is named by the list it stands for and not by its boxd.it code.
+  const address = movieData ? watchItemPath(movieData.watch_item) : undefined;
 
   useEffect(() => {
-    document.title = watchItemPath ? `${watchItemPath} · ${APP_TITLE}` : APP_TITLE;
+    document.title = address ? `${address} · ${APP_TITLE}` : APP_TITLE;
     return () => {
       document.title = APP_TITLE;
     };
-  }, [watchItemPath]);
+  }, [address]);
 
   const loadMovies = async (id: number) => {
     try {
@@ -259,7 +262,7 @@ const MoviesPage: React.FC = () => {
         <div className="border-b border-dark-border pb-5 flex justify-between items-start gap-4">
           <div className="min-w-0">
             <h1 className="text-2xl font-bold leading-6 text-dark-text-primary">
-              Movies from {movieData.watch_item.path}
+              Movies from {address}
             </h1>
             <p className="mt-2 max-w-4xl text-sm text-dark-text-muted">
               Viewing {movieData.total_count} movies from this Letterboxd list
