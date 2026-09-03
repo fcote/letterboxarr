@@ -371,7 +371,8 @@ const UpcomingPage: React.FC = () => {
               {data.country
                 ? <>Release dates in <span className="text-dark-text-secondary">{data.country}</span> for
                    the films your watch lists are waiting on, falling back to the earliest date
-                   elsewhere when nothing has been announced there yet.</>
+                   elsewhere when nothing has been announced there yet. A film already out there
+                   drops off, whatever it has left to announce.</>
                 : <>The earliest release date anywhere for the films your watch lists are waiting on.
                    Pick a country on the configuration page to be told when they come out where
                    you are.</>}
@@ -417,9 +418,11 @@ const UpcomingPage: React.FC = () => {
                 <div className="ml-5 w-0 flex-1">
                   <dl>
                     {/* Some have nothing announced anywhere, some have had
-                        every date they were given, some have only a premiere or
-                        a disc pressing left: all are "nothing ahead" */}
-                    <dt className="text-sm font-medium text-dark-text-muted truncate">No date ahead</dt>
+                        every date they were given, some are out where you are
+                        already and only their digital date is left, some have
+                        only a premiere or a disc pressing: none is worth
+                        waiting on, whatever its release table still holds */}
+                    <dt className="text-sm font-medium text-dark-text-muted truncate">Nothing to wait for</dt>
                     <dd className="text-lg font-medium text-dark-text-primary">{data.undated_count}</dd>
                   </dl>
                 </div>
@@ -541,8 +544,8 @@ const UpcomingPage: React.FC = () => {
                       ? `${data.unread_count} of the ${data.candidate_count} recent films in your `
                         + `lists ${data.unread_count === 1 ? 'has' : 'have'} not been read from `
                         + 'Letterboxd yet. They are read in the background, or refresh now.'
-                      : `None of the ${data.candidate_count} recent films in your lists has a `
-                        + 'release date announced ahead of today.'}
+                      : `None of the ${data.candidate_count} recent films in your lists has `
+                        + 'anything left to wait for.'}
             </p>
           </div>
         ) : visible.length === 0 ? (

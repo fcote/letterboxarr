@@ -749,16 +749,20 @@ def upcoming_release(releases: List[Dict], country: Optional[str],
     yet, so the soonest date anywhere stands in, flagged as somebody else's. A
     date from another country is a far better answer than no date at all.
 
-    A country whose every announced date has been and gone has made up its
-    mind: the film is out where you are. Nothing about it is upcoming, and
-    dating it by a premiere still to come on the other side of the world would
-    tell you to wait for a film you could watch tonight.
+    A country with any date already behind it has made up its mind: the film is
+    out where you are, and it does not become upcoming again. Every date after
+    the first is the same film reaching somewhere new — a cinema run going
+    digital, a digital release reaching television — never a first chance to
+    watch it, so dating a film by one would have you waiting until November for
+    something you could have seen in July. The Odyssey, in French cinemas since
+    the summer and digital in the autumn, is the shape of this.
 
-    Only releases still ahead are ever picked from. Taking the soonest of all
-    of them and dropping the film when that one had passed would date every
-    film by its first release anywhere, which is always a theatrical run: no
-    digital date would ever be reached, and a limited opening would bury the
-    film's own wide release months later.
+    Only releases still ahead are ever picked from, which is what leaves the
+    date standing in from elsewhere anything to say: a film always opens
+    somewhere before it opens everywhere, so reading its first release anywhere
+    as "out" would answer with nothing for every film the configured country
+    has yet to speak about, and bury a wide opening under the limited run that
+    came months before it.
 
     Several countries commonly share the soonest date, so the type and the
     country break the tie: which of them a row names would otherwise depend on
@@ -777,8 +781,11 @@ def upcoming_release(releases: List[Dict], country: Optional[str],
 
     local = [release for release in releases if release['country'] == country]
     if local:
-        chosen = soonest(local)
-        return {**chosen, 'in_preferred_country': True} if chosen else None
+        # Out where you are, and out for good. With nothing behind it every
+        # local date is still ahead, so there is always one left to pick.
+        if any(release['date'] < today for release in local):
+            return None
+        return {**soonest(local), 'in_preferred_country': True}
 
     chosen = soonest(releases)
     return {**chosen, 'in_preferred_country': False} if chosen else None
@@ -792,11 +799,13 @@ def get_upcoming(current_user: dict = Depends(context.get_current_user)):
     """The films the watch items are waiting on, in release order
 
     Only the films of this year and later are considered, and of those only the
-    ones with a date still ahead: a film whose every announced release has come
-    and gone has nothing upcoming about it, wherever it came out. Films left
-    with nothing but a premiere or a disc pressing count as having nothing
-    ahead too. Films without a date ahead are counted rather than listed, so a
-    page showing three releases out of forty says why.
+    ones there is still something to wait for: a film already out in the
+    configured country is out for good, whatever it has left to announce there,
+    and one whose every announced release has come and gone has nothing
+    upcoming about it wherever it came out. Films left with nothing but a
+    premiere or a disc pressing have nothing to wait for either. All of them
+    are counted rather than listed, so a page showing three releases out of
+    forty says why.
     """
     if not context.current_config or not context.sync_instance:
         raise HTTPException(status_code=404, detail="Configuration not found")
