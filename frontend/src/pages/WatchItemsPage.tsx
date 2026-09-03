@@ -530,7 +530,12 @@ const WatchItemsPage: React.FC = () => {
     }
   };
 
-  if (loading) {
+  // The whole page is only ever replaced while there is nothing on it yet. A
+  // change of search, filter or sort leaves the header and the toolbar where
+  // they are and redraws the list under them: unmounting the page on every
+  // query took the caret out of the search field mid-word, which reads as the
+  // page having reloaded.
+  if (loading && loadedKey === null) {
     return (
       <Layout>
         <div className="flex justify-center items-center h-64">
@@ -880,8 +885,12 @@ const WatchItemsPage: React.FC = () => {
           </div>
         )}
 
-        {/* Search, sort and filters on one row, kept in reach while scrolling */}
-        {watchItems.length > 0 && (
+        {/* Search, sort and filters on one row, kept in reach while scrolling.
+            Shown whenever there is anything to filter rather than whenever
+            something matched: a search that came back empty used to take the
+            field it was typed into off the screen, and with it the only way of
+            correcting the search that emptied the page. */}
+        {total > 0 && (
           <div className="sticky top-0 z-10 mt-6 flex flex-wrap items-center gap-2 bg-dark-bg-primary py-3">
             <div className="relative min-w-64 max-w-sm flex-1">
               <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-dark-text-muted" />
@@ -968,9 +977,14 @@ const WatchItemsPage: React.FC = () => {
           </p>
         )}
 
-        {/* Watch Items List */}
-        <div className="mt-6">
-          {watchItems.length === 0 ? (
+        {/* Watch Items List. Dimmed rather than emptied while a new query is
+            in flight: the rows below are the ones being replaced, and taking
+            them away makes the page jump about on every keystroke. */}
+        <div className={`mt-6 transition-opacity ${loading ? 'opacity-50' : ''}`} aria-busy={loading}>
+          {/* Nothing configured at all, against nothing matching the filters:
+              the first is answered by adding a list and the second by changing
+              the search, so they cannot share a message. */}
+          {total === 0 ? (
             <div className="text-center py-12">
               <FilmIcon className="mx-auto h-12 w-12 text-dark-text-muted" />
               <h3 className="mt-2 text-sm font-medium text-dark-text-primary">No watch items</h3>
@@ -978,7 +992,7 @@ const WatchItemsPage: React.FC = () => {
                 Get started by adding a Letterboxd list to sync.
               </p>
             </div>
-          ) : watchItems.length === 0 ? (
+          ) : matched === 0 ? (
             <div className="text-center py-12">
               <MagnifyingGlassIcon className="mx-auto h-12 w-12 text-dark-text-muted" />
               <h3 className="mt-2 text-sm font-medium text-dark-text-primary">No matching watch items</h3>
