@@ -1,5 +1,5 @@
 import axios, { AxiosResponse } from 'axios';
-import { Config, DashboardSummary, LoginCredentials, QualityProfile, SyncProgress, Token, UpcomingRefreshResult, UpcomingReleases, WatchItem, WatchItemMovies, WatchItemProgress, LetterboxdTestResult } from '../types';
+import { Config, DashboardSummary, LoginCredentials, QualityProfile, SyncProgress, Token, UpcomingRefreshResult, UpcomingReleases, WatchItem, WatchItemMovies, WatchItemProgress, WatchItemQuery, WatchItemsPage, LetterboxdTestResult } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -45,8 +45,10 @@ export const configAPI = {
 };
 
 export const watchItemsAPI = {
-  getAll: async (): Promise<WatchItem[]> => {
-    const response: AxiosResponse<WatchItem[]> = await api.get('/watch-items');
+  getPage: async (query: WatchItemQuery): Promise<WatchItemsPage> => {
+    const response: AxiosResponse<WatchItemsPage> = await api.get('/watch-items', {
+      params: { ...query, tags: query.tags.join(',') }
+    });
     return response.data;
   },
   create: async (item: Omit<WatchItem, 'id'>): Promise<{ message: string }> => {
@@ -66,11 +68,6 @@ export const watchItemsAPI = {
     return response.data;
   },
   // Every list in one request: the page needs the whole set to sort and filter on
-  getAllProgress: async (): Promise<WatchItemProgress[]> => {
-    const response: AxiosResponse<{ items: WatchItemProgress[] }> =
-      await api.get('/watch-items/progress');
-    return response.data.items;
-  },
   refresh: async (id: number): Promise<{ item_id: number; path: string; refreshed: number }> => {
     const response = await api.post(`/watch-items/${id}/refresh`);
     return response.data;

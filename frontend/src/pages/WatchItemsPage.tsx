@@ -22,9 +22,19 @@ import {
   PencilIcon
 } from '@heroicons/react/24/outline';
 
-// The stored progress of every list arrives in one request, so they all land
-// together; a single item goes back to 'loading' while it is refreshed on its own
-type ProgressState = WatchItemProgress | 'loading' | 'error';
+// Progress arrives on the row it belongs to. Only a row being refreshed on its
+// own leaves that state, which is what this holds: everything else reads the
+// progress the server sent with the page.
+type RowState = 'loading' | 'error';
+
+// How many rows a page holds, matching the server's own page size. The list
+// appends as it scrolls rather than paging, so this is how much arrives at a
+// time and not a limit on how much can be shown.
+const PAGE_SIZE = 100;
+
+// Typing runs ahead of the network, and every keystroke is now a request that
+// searches two hundred lists rather than a filter over an array already in hand
+const SEARCH_DEBOUNCE_MS = 300;
 
 // The field drops its 'letterboxd.com/' prefix once a whole link is typed,
 // since the address would read as nonsense underneath it
@@ -49,22 +59,27 @@ const SORTS: [SortKey, string][] = [
 
 type AutoAddFilter = 'all' | 'on' | 'off';
 
-// Whichever way a column is sorted, the lists it says nothing about go last
-const compareWithUnknownLast = (a: number | null, b: number | null, direction: 1 | -1): number => {
-  if (a === null && b === null) return 0;
-  if (a === null) return 1;
-  if (b === null) return -1;
-  return (a - b) * direction;
-};
-
 const WatchItemsPage: React.FC = () => {
   const [watchItems, setWatchItems] = useState<WatchItem[]>([]);
+  // What the server answered about the whole set, not the page: how many matched
+  // the filters, how many are configured, and every tag worth filtering by
+  const [matched, setMatched] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [tagOptions, setTagOptions] = useState<TagOption[]>([]);
   const [search, setSearch] = useState('');
+  // What the requests actually carry. Held apart from `search` so the field
+  // stays responsive while the query it sends settles.
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [sort, setSort] = useState<SortKey>('config');
   const [autoAddFilter, setAutoAddFilter] = useState<AutoAddFilter>('all');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [progress, setProgress] = useState<Record<number, ProgressState>>({});
-  const progressRun = useRef(0);
+  // Only the rows being refreshed one at a time; the rest carry their own
+  const [rowState, setRowState] = useState<Record<number, RowState>>({});
+  const [loadingMore, setLoadingMore] = useState(false);
+  // Abandons a run as soon as a newer one starts, so a slow answer to an old
+  // query cannot land on top of a fresher one — the filters change faster than
+  // two hundred listings can be read
+  const pageRun = useRef(0);
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
@@ -92,86 +107,146 @@ const WatchItemsPage: React.FC = () => {
   const [deleting, setDeleting] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState<number | null>(null);
 
-  // Refreshing one list re-reads only that one's progress, leaving the rest alone
-  const loadItemProgress = useCallback(async (id: number) => {
-    setProgress(previous => ({ ...previous, [id]: 'loading' }));
+  // Names the query the rows on screen were fetched for. The observer watching
+  // the bottom of the list re-arms on every filter change, and it would
+  // otherwise be free to fire in the gap before the new first page lands —
+  // asking for "the next hundred" at an offset counted from the rows of the
+  // query just abandoned, and appending them under a heading they do not
+  // belong to. Nothing is fetched until what is on screen matches what is asked.
+  const queryKey = JSON.stringify([
+    debouncedSearch.trim(), autoAddFilter, [...selectedTags].sort(), sort
+  ]);
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+
+  // What every request carries. Gathered in one place so the effect that loads
+  // the first page and the observer that loads the rest cannot drift apart.
+  const query = useCallback((offset: number) => ({
+    offset,
+    limit: PAGE_SIZE,
+    search: debouncedSearch.trim(),
+    auto_add: autoAddFilter,
+    tags: selectedTags,
+    sort
+  }), [debouncedSearch, autoAddFilter, selectedTags, sort]);
+
+  // Refreshing one list re-reads only that one, leaving the rest of the page
+  // alone. Its name and last-read date come back with its progress, so a
+  // refreshed row is replaced whole rather than left showing the date it had.
+  const reloadItem = useCallback(async (id: number) => {
+    setRowState(previous => ({ ...previous, [id]: 'loading' }));
     try {
       const itemProgress = await watchItemsAPI.getProgress(id);
-      setProgress(previous => ({ ...previous, [id]: itemProgress }));
+      setWatchItems(previous => previous.map(item =>
+        item.id === id ? { ...item, progress: itemProgress } : item
+      ));
+      setRowState(previous => {
+        const { [id]: _removed, ...rest } = previous;
+        return rest;
+      });
     } catch (error: any) {
-      setProgress(previous => ({ ...previous, [id]: 'error' }));
+      setRowState(previous => ({ ...previous, [id]: 'error' }));
     }
   }, []);
 
-  // Every list in one request. The server answers from the stored listings, so
-  // this no longer waits on Letterboxd, and a run is abandoned as soon as a newer
-  // one starts so a slow answer cannot overwrite a fresher one.
-  const loadProgress = useCallback(async (items: WatchItem[]) => {
-    progressRun.current += 1;
-    const run = progressRun.current;
-
-    const ids = items
-      .map(item => item.id)
-      .filter((id): id is number => id !== undefined);
-    setProgress(Object.fromEntries(ids.map(id => [id, 'loading' as ProgressState])));
+  // The first page of a query, replacing whatever was on screen. Every change of
+  // search, filter or sort comes through here: the order is the server's, so a
+  // page appended onto rows ordered by something else would interleave two
+  // different orderings.
+  const loadFirstPage = useCallback(async () => {
+    pageRun.current += 1;
+    const run = pageRun.current;
+    setLoading(true);
 
     try {
-      const all = await watchItemsAPI.getAllProgress();
-      if (run !== progressRun.current) return;
-      setProgress(Object.fromEntries(all.map(item => [item.item_id, item as ProgressState])));
+      const page = await watchItemsAPI.getPage(query(0));
+      if (run !== pageRun.current) return;
+      setWatchItems(page.items);
+      setMatched(page.matched);
+      setTotal(page.total);
+      setTagOptions(page.tag_options);
+      setRowState({});
+      setLoadedKey(queryKey);
     } catch (error: any) {
-      if (run !== progressRun.current) return;
-      setProgress(Object.fromEntries(ids.map(id => [id, 'error' as ProgressState])));
-    }
-  }, []);
-
-  // A row's name and last-read date come from the watch items, not from its
-  // progress, so refreshing one has to re-read those too or the row goes on
-  // showing the date it had before. Only the refreshed row is replaced, which
-  // leaves the progress already on screen alone.
-  const reloadItemDetails = useCallback(async (id: number) => {
-    try {
-      const items = await watchItemsAPI.getAll();
-      setWatchItems(previous => previous.map(item => {
-        if (item.id !== id) return item;
-        return items.find(candidate => candidate.id === id) ?? item;
-      }));
-    } catch (error: any) {
-      // The refresh itself worked; an out-of-date line on the row is not worth
-      // interrupting anyone over
-    }
-  }, []);
-
-  const loadWatchItems = useCallback(async () => {
-    try {
-      const items = await watchItemsAPI.getAll();
-      setWatchItems(items);
-      loadProgress(items);
-    } catch (error: any) {
+      if (run !== pageRun.current) return;
       toast.error('Failed to load watch items');
     } finally {
-      setLoading(false);
+      if (run === pageRun.current) setLoading(false);
     }
-  }, [loadProgress]);
+  }, [query, queryKey]);
+
+  // The next page, appended. Guarded on the run as well, so a page answered
+  // after the filters moved on is dropped rather than appended to a list it
+  // does not belong to.
+  const loadNextPage = useCallback(async () => {
+    pageRun.current += 1;
+    const run = pageRun.current;
+    setLoadingMore(true);
+
+    try {
+      const page = await watchItemsAPI.getPage(query(watchItems.length));
+      if (run !== pageRun.current) return;
+      setWatchItems(previous => [...previous, ...page.items]);
+      setMatched(page.matched);
+      setTotal(page.total);
+    } catch (error: any) {
+      if (run !== pageRun.current) return;
+      toast.error('Failed to load more watch items');
+    } finally {
+      if (run === pageRun.current) setLoadingMore(false);
+    }
+  }, [query, watchItems.length]);
+
+  // Everything a mutation has to do. The ids are positions in the configured
+  // list and deleting one shifts every id after it, so an appended list built
+  // on the old ids would be wrong: the only safe answer is to start again from
+  // the first page, at the cost of where the page was scrolled to.
+  const loadWatchItems = loadFirstPage;
+
+  // Whether the list on screen is all of what matched, which is what says
+  // there is another page to fetch when the bottom comes into view
+  const hasMore = watchItems.length < matched;
+
+  // The field stays responsive while the query it sends settles
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  // The bottom of the list coming into view is what asks for the next page. An
+  // observer rather than a scroll handler: it fires when the sentinel is
+  // actually visible, which is the question being asked, and it costs nothing
+  // on the scrolls where it is not.
+  //
+  // The margin starts the fetch a screen early, so the rows are usually there
+  // by the time the last of the current ones is reached.
+  const sentinel = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    loadWatchItems();
-  }, [loadWatchItems]);
+    const node = sentinel.current;
+    // No node while the first page is loading or the list is empty, nothing to
+    // fetch once every matching list is in hand, and nothing to append while
+    // the rows on screen still belong to the query before this one
+    if (!node || !hasMore || loading || loadingMore || loadedKey !== queryKey) return;
 
-  // The progress of a list once it is in, or null while it is loading or failed
+    const observer = new IntersectionObserver(
+      entries => { if (entries[0].isIntersecting) loadNextPage(); },
+      { rootMargin: '600px' }
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [hasMore, loading, loadingMore, loadNextPage, loadedKey, queryKey]);
+
+  // Reloads on every change of query, since all of it is decided on the server
+  useEffect(() => {
+    loadFirstPage();
+  }, [loadFirstPage]);
+
+  // The progress of a list, or null while a refresh of that row is in flight or
+  // has failed. It arrives on the row, so there is no waiting on a second
+  // request for it any more.
   const progressOf = (item: WatchItem): WatchItemProgress | null => {
-    const state = item.id === undefined ? undefined : progress[item.id];
-    return state && state !== 'loading' && state !== 'error' ? state : null;
-  };
-
-  // How much of a list is watched, null when that is not known: not read yet, no
-  // Letterboxd profile configured, or nothing in the list to watch
-  const watchedShare = (item: WatchItem): number | null => {
-    const state = progressOf(item);
-    if (!state || !state.read || state.watched === null || state.total === 0) {
-      return null;
-    }
-    return state.watched / state.total;
+    if (item.id !== undefined && rowState[item.id]) return null;
+    return item.progress ?? null;
   };
 
   // How Letterboxd rates a list, null until some film of it has been rated. The
@@ -200,7 +275,7 @@ const WatchItemsPage: React.FC = () => {
 
   // Carries no outer spacing of its own: the row sits it on its one line
   const renderProgress = (item: WatchItem) => {
-    const state = item.id === undefined ? undefined : progress[item.id];
+    const state = (item.id !== undefined && rowState[item.id]) || item.progress;
 
     if (!state) {
       return null;
@@ -318,26 +393,6 @@ const WatchItemsPage: React.FC = () => {
     setSelectedTags([]);
   };
 
-  // Only tags on more than one list are worth filtering by: a tag used once picks
-  // out the single list that carries it, which searching already does. Counted over
-  // every watch item rather than the visible ones, so the choices do not shift
-  // about as the filters change.
-  const tagOptions = ((): TagOption[] => {
-    const counts = new Map<string, number>();
-    for (const item of watchItems) {
-      for (const tag of item.tags ?? []) {
-        counts.set(tag, (counts.get(tag) ?? 0) + 1);
-      }
-    }
-
-    // Array.from rather than a spread: the build targets a version that cannot
-    // iterate a Map directly
-    return Array.from(counts.entries())
-      .filter(([, count]) => count > 1)
-      .map(([tag, count]) => ({ tag, count }))
-      .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
-  })();
-
   const handleAddTags = () => {
     if (tagInput.trim()) {
       const tags = tagInput.split(',').map(tag => tag.trim()).filter(tag => tag);
@@ -451,7 +506,7 @@ const WatchItemsPage: React.FC = () => {
     try {
       // Answers once the list is stored, so both of these read off the new one
       await watchItemsAPI.refresh(item.id);
-      await Promise.all([loadItemProgress(item.id), reloadItemDetails(item.id)]);
+      await reloadItem(item.id);
       toast.success(`${watchItemAddress(item)} re-read from Letterboxd`);
     } catch (error: any) {
       toast.error(error.response?.data?.detail || 'Failed to refresh this watch item');
@@ -485,80 +540,15 @@ const WatchItemsPage: React.FC = () => {
     );
   }
 
-  const query = search.trim().toLowerCase();
-  const filtersActive = query !== '' || autoAddFilter !== 'all' || selectedTags.length > 0;
+  const filtersActive =
+    search.trim() !== '' || autoAddFilter !== 'all' || selectedTags.length > 0;
 
-  // The Letterboxd name is searchable as well as the path, so a list whose path
-  // is an opaque slug can still be found by what it is called. Both the address
-  // on the row and the path as configured match, since a share link shows as
-  // one and is written as the other.
-  const matchesSearch = (item: WatchItem) =>
-    !query ||
-    item.path.toLowerCase().includes(query) ||
-    watchItemAddress(item).toLowerCase().includes(query) ||
-    (item.name ?? '').toLowerCase().includes(query) ||
-    (item.tags ?? []).some(tag => tag.toLowerCase().includes(query));
-
-  const matchesFilters = (item: WatchItem) => {
-    const autoAdd = item.auto_add !== false;
-    if (autoAddFilter === 'on' && !autoAdd) return false;
-    if (autoAddFilter === 'off' && autoAdd) return false;
-
-    // Any one of the picked tags is enough, so picking more widens the result
-    if (selectedTags.length > 0) {
-      const tags = item.tags ?? [];
-      if (!selectedTags.some(tag => tags.includes(tag))) return false;
-    }
-
-    return true;
-  };
-
-  const sortItems = (items: WatchItem[]): WatchItem[] => {
-    const sorted = [...items];
-
-    switch (sort) {
-      case 'path':
-        // On the address shown rather than the path configured: ordering a
-        // share link by its boxd.it code puts it nowhere anyone would look
-        return sorted.sort((a, b) => watchItemAddress(a).localeCompare(watchItemAddress(b)));
-      case 'least-watched':
-        return sorted.sort((a, b) => compareWithUnknownLast(watchedShare(a), watchedShare(b), 1));
-      case 'most-watched':
-        return sorted.sort((a, b) => compareWithUnknownLast(watchedShare(a), watchedShare(b), -1));
-      case 'largest':
-        return sorted.sort((a, b) => compareWithUnknownLast(
-          progressOf(a)?.total ?? null, progressOf(b)?.total ?? null, -1
-        ));
-      case 'best-rated':
-        return sorted.sort((a, b) => compareWithUnknownLast(
-          ratingsOf(a)?.rating ?? null, ratingsOf(b)?.rating ?? null, -1
-        ));
-      case 'best-weighted':
-        return sorted.sort((a, b) => compareWithUnknownLast(
-          ratingsOf(a)?.weighted_rating ?? null, ratingsOf(b)?.weighted_rating ?? null, -1
-        ));
-      case 'most-popular':
-        return sorted.sort((a, b) => compareWithUnknownLast(
-          ratingsOf(a)?.popularity ?? null, ratingsOf(b)?.popularity ?? null, -1
-        ));
-      case 'stalest':
-        // Never read is as out of date as a list gets, so those lead
-        return sorted.sort((a, b) => (a.last_refreshed ?? 0) - (b.last_refreshed ?? 0));
-      default:
-        return sorted;
-    }
-  };
-
-  const visibleItems = sortItems(
-    watchItems.filter(item => matchesSearch(item) && matchesFilters(item))
-  );
-
-  // Ordered on ratings none of the visible lists have yet, so the order on
-  // screen is the one it started in and nothing says why
+  // Ordered on ratings none of the lists in hand have yet, so the order on
+  // screen is the one the server could give and nothing says why
   const ratingSortPending =
     (sort === 'best-rated' || sort === 'best-weighted' || sort === 'most-popular')
-    && visibleItems.length > 0
-    && visibleItems.every(item => ratingsOf(item) === null);
+    && watchItems.length > 0
+    && watchItems.every(item => ratingsOf(item) === null);
 
   return (
     <Layout>
@@ -946,9 +936,9 @@ const WatchItemsPage: React.FC = () => {
 
             {/* Filters on the left, what came back and how it is ordered on the right */}
             <span className="ml-auto whitespace-nowrap text-xs text-dark-text-muted">
-              {visibleItems.length === watchItems.length
-                ? `${watchItems.length} list${watchItems.length === 1 ? '' : 's'}`
-                : `${visibleItems.length} of ${watchItems.length}`}
+              {matched === total
+                ? `${total} list${total === 1 ? '' : 's'}`
+                : `${matched} of ${total}`}
             </span>
 
             <label className="ml-2 flex items-center gap-2 whitespace-nowrap text-xs text-dark-text-muted">
@@ -988,12 +978,12 @@ const WatchItemsPage: React.FC = () => {
                 Get started by adding a Letterboxd list to sync.
               </p>
             </div>
-          ) : visibleItems.length === 0 ? (
+          ) : watchItems.length === 0 ? (
             <div className="text-center py-12">
               <MagnifyingGlassIcon className="mx-auto h-12 w-12 text-dark-text-muted" />
               <h3 className="mt-2 text-sm font-medium text-dark-text-primary">No matching watch items</h3>
               <p className="mt-1 text-sm text-dark-text-muted">
-                {query
+                {search.trim()
                   ? `No path, name or tag matches "${search.trim()}".`
                   : 'None of your lists match the filters you have set.'}
               </p>
@@ -1004,7 +994,7 @@ const WatchItemsPage: React.FC = () => {
           ) : (
             <div className="card overflow-hidden">
               <ul className="divide-y divide-dark-border">
-                {visibleItems.map((item) => (
+                {watchItems.map((item) => (
                   <li key={item.id} className="px-4 py-2">
                     {/* One line per list: the path takes what room is left, and
                         everything that is not needed at a glance is on the hover
@@ -1071,6 +1061,20 @@ const WatchItemsPage: React.FC = () => {
                   </li>
                 ))}
               </ul>
+
+              {/* Sits below the last row and is watched rather than clicked.
+                  Rendered only while there is a page left, so reaching the end
+                  of the list is the end of it rather than a spinner that never
+                  resolves. */}
+              {hasMore && (
+                <div ref={sentinel} className="flex items-center justify-center gap-2 py-4">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-brand-blue"></div>
+                  <span className="text-xs text-dark-text-muted">
+                    Loading {Math.min(PAGE_SIZE, matched - watchItems.length)} more
+                    {' '}of {matched}
+                  </span>
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -125,6 +125,34 @@ export interface WatchItem {
     skip_unreleased: boolean;
     skip_tv_shows: boolean;
   } | null;
+  // Arrives with the row rather than from a request of its own: six of the sorts
+  // order on these, so the server that ordered the page had to have them anyway
+  progress?: WatchItemProgress;
+}
+
+// What the watch items page asks for, all of it applied on the server: ordering
+// by rating or by how much is watched cannot be done in a browser holding only
+// the page it was sent.
+export interface WatchItemQuery {
+  offset: number;
+  limit: number;
+  search: string;
+  auto_add: 'all' | 'on' | 'off';
+  tags: string[];
+  sort: string;
+}
+
+export interface WatchItemsPage {
+  items: WatchItem[];
+  offset: number;
+  limit: number;
+  // How many matched the filters, against how many are configured — the line
+  // above the list reads "137 of 216" from these
+  matched: number;
+  total: number;
+  // Counted over every item rather than the matched ones, so the choices do not
+  // shift about as the filters change
+  tag_options: { tag: string; count: number }[];
 }
 
 export type MovieCategory = 'film' | 'short_film' | 'documentary' | 'tv_show' | 'unreleased';
