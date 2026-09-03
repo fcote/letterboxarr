@@ -54,6 +54,28 @@ export interface SyncRun {
   error: string | null;
 }
 
+// Where a running round has got to. `version` is the cursor the long poll hangs
+// on: hand back the one you last saw and the request waits until there is a
+// newer one. Everything is null or zero between rounds.
+export interface SyncProgress {
+  version: number;
+  running: boolean;
+  // One of the phase keys the backend names; null between phases and rounds
+  phase: 'lists' | 'radarr' | 'releases' | 'ratings' | null;
+  // What that phase is called, already worded for the screen
+  label: string | null;
+  step: number;
+  steps: number;
+  done: number;
+  total: number;
+  // The list or film being read right now
+  item: string | null;
+  added: number;
+  started_at: number | null;
+  // Travels with the round ending, so the page can say how it went without asking again
+  last: SyncRun | null;
+}
+
 export interface SyncStatus {
   running: boolean;
   started_at: number | null;

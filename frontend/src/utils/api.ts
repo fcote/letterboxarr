@@ -1,5 +1,5 @@
 import axios, { AxiosResponse } from 'axios';
-import { Config, DashboardSummary, LoginCredentials, QualityProfile, SyncStatus, Token, UpcomingRefreshResult, UpcomingReleases, WatchItem, WatchItemMovies, WatchItemProgress, LetterboxdTestResult } from '../types';
+import { Config, DashboardSummary, LoginCredentials, QualityProfile, SyncProgress, Token, UpcomingRefreshResult, UpcomingReleases, WatchItem, WatchItemMovies, WatchItemProgress, LetterboxdTestResult } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -124,8 +124,14 @@ export const syncAPI = {
     const response = await api.post('/sync/run');
     return response.data;
   },
-  getStatus: async (): Promise<SyncStatus> => {
-    const response: AxiosResponse<SyncStatus> = await api.get('/sync/status');
+  // Held open by the server until the round moves past `version`, or for about
+  // twenty-five seconds if it does not. The signal is what lets the page drop
+  // one of these on unmount instead of leaving it running to its own timeout.
+  getProgress: async (version: number, signal?: AbortSignal): Promise<SyncProgress> => {
+    const response: AxiosResponse<SyncProgress> = await api.get('/sync/progress', {
+      params: { version },
+      signal
+    });
     return response.data;
   },
 };

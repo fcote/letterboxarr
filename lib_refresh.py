@@ -23,6 +23,7 @@ from typing import Dict, List, NamedTuple, Optional
 from lib_config import Config, WatchListItem
 from lib_db import Database
 from lib_letterboxd import CATEGORY_FILM, LetterboxdScraper
+from lib_progress import PHASE_LISTS, PHASE_RATINGS, PHASE_RELEASES, SyncProgress
 
 # How old a film's release table may be before it is read again. Dates are
 # announced and moved over weeks, not minutes, so re-reading one on every sync
@@ -66,11 +67,15 @@ class UpcomingCandidates(NamedTuple):
 class ListRefresher:
     """Re-reads the watch items and the watched profile from Letterboxd"""
 
-    def __init__(self, logger, config: Config, scraper: LetterboxdScraper, db: Database):
+    def __init__(self, logger, config: Config, scraper: LetterboxdScraper, db: Database,
+                 progress: Optional[SyncProgress] = None):
         self.logger = logger
         self.config = config
         self.scraper = scraper
         self.db = db
+        # Optional so a refresher can be built on its own — the round that has
+        # a dashboard watching it is the one that passes one in
+        self.progress = progress or SyncProgress()
 
     def refresh_all(self, max_age: Optional[float] = None) -> Dict:
         """Re-read every watch item and the watched profile
@@ -83,9 +88,21 @@ class ListRefresher:
         watch_items = self.config.letterboxd.watch
         self.logger.info(f"Refreshing {len(watch_items)} watch list(s) from Letterboxd")
 
+        # The watched profile is read at the end of this phase, so it is one
+        # more thing to get through whenever a username is configured
+        self.progress.begin(
+            PHASE_LISTS, len(watch_items) + (1 if self.config.letterboxd.username else 0)
+        )
+
         refreshed = 0
         failed = 0
-        for watch_item in watch_items:
+        for index, watch_item in enumerate(watch_items):
+            # The name it is known by on the watch items page, not its path: a
+            # row reading "director/christopher-nolan" names the same list less
+            # well than "Films directed by Christopher Nolan" does
+            self.progress.step_item(
+                self.db.get_path_name(watch_item.path) or watch_item.path, index
+            )
             try:
                 refreshed += self.refresh_watch_item(watch_item, max_age)
             except Exception as e:
@@ -97,6 +114,7 @@ class ListRefresher:
             self.logger.info(f"Dropped {pruned} listing(s) that are no longer watched")
 
         watched = self._refresh_watched(max_age)
+        self.progress.finish_phase()
 
         self.logger.info(
             f"Refresh done: {refreshed} listing(s) re-read, {failed} watch list(s) failed"
@@ -193,6 +211,10 @@ class ListRefresher:
         due.sort(key=lambda candidate: read_at.get(candidate['letterboxd_slug'], 0))
 
         if not due:
+            # Still announced, with nothing to get through: a phase that is
+            # already current is a step of the round that has been taken, and
+            # skipping it here would have the next one call itself the wrong one
+            self.progress.begin(PHASE_RELEASES, 0)
             self.logger.debug(f"Release dates are current for all {len(candidates)} recent film(s)")
             return {'read': 0, 'failed': 0, 'left': 0, 'candidates': len(candidates)}
 
@@ -202,9 +224,13 @@ class ListRefresher:
             + (f", {left} left for the next round" if left else "")
         )
 
+        batch = due[:RELEASE_READS_PER_ROUND]
+        self.progress.begin(PHASE_RELEASES, len(batch))
+
         read = 0
         failed = 0
-        for index, candidate in enumerate(due[:RELEASE_READS_PER_ROUND]):
+        for index, candidate in enumerate(batch):
+            self.progress.step_item(candidate.get('title') or candidate['letterboxd_slug'], index)
             # Between every pair of pages, whether or not the last one worked: a
             # run of refused pages is when pausing matters most, and skipping the
             # wait on failure would go at Letterboxd hardest just then
@@ -226,6 +252,7 @@ class ListRefresher:
             self.db.save_film_releases(candidate, releases)
             read += 1
 
+        self.progress.finish_phase()
         self.logger.info(f"Release dates: {read} film(s) read, {failed} failed")
         return {'read': read, 'failed': failed, 'left': left, 'candidates': len(candidates)}
 
@@ -281,6 +308,8 @@ class ListRefresher:
         due.sort(key=lambda candidate: read_at.get(candidate['letterboxd_slug'], 0))
 
         if not due:
+            # Counted even with nothing due, for the reason the release dates are
+            self.progress.begin(PHASE_RATINGS, 0)
             self.logger.debug(f"Ratings are current for all {len(candidates)} film(s)")
             return {'read': 0, 'failed': 0, 'left': 0, 'candidates': len(candidates)}
 
@@ -290,9 +319,13 @@ class ListRefresher:
             + (f", {left} left for the next round" if left else "")
         )
 
+        batch = due[:STATS_READS_PER_ROUND]
+        self.progress.begin(PHASE_RATINGS, len(batch))
+
         read = 0
         failed = 0
-        for index, candidate in enumerate(due[:STATS_READS_PER_ROUND]):
+        for index, candidate in enumerate(batch):
+            self.progress.step_item(candidate.get('title') or candidate['letterboxd_slug'], index)
             # Between every pair of pages, whether or not the last one worked,
             # for the reason the release tables above wait
             if index:
@@ -313,6 +346,7 @@ class ListRefresher:
             self.db.save_film_stats(candidate, stats)
             read += 1
 
+        self.progress.finish_phase()
         self.logger.info(f"Ratings: {read} film(s) read, {failed} failed")
         return {'read': read, 'failed': failed, 'left': left, 'candidates': len(candidates)}
 
@@ -321,6 +355,11 @@ class ListRefresher:
         username = self.config.letterboxd.username
         if not username:
             return False
+
+        # The last thing the lists phase gets through, counted after every
+        # watch item since it is read once they are all done
+        self.progress.step_item(f"{username}'s watched films",
+                                len(self.config.letterboxd.watch))
 
         try:
             return self.scraper.refresh_watched(username, max_age)

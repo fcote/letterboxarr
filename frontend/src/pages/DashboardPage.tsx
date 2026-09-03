@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { configAPI, dashboardAPI, radarrAPI, syncAPI } from '../utils/api';
-import { Config, DashboardSummary, QualityProfile, SyncRun } from '../types';
+import { Config, DashboardSummary, QualityProfile, SyncProgress, SyncRun } from '../types';
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
+import SyncStatusBanner from '../components/SyncStatusBanner';
 import { relativeTime, duration } from '../utils/time';
 import {
   CheckCircleIcon,
@@ -14,8 +15,11 @@ import {
   PlayIcon
 } from '@heroicons/react/24/outline';
 
-// How often to ask whether a running sync has finished
-const SYNC_POLL_MS = 3000;
+// How long to wait before asking again after a failed request. The progress
+// request is held open by the server until there is something to say, so a
+// failure is the connection going rather than a round with nothing to report:
+// asking straight back would be a hot loop against a backend that is restarting.
+const SYNC_RETRY_MS = 2000;
 
 const DashboardPage: React.FC = () => {
   const [config, setConfig] = useState<Config | null>(null);
@@ -23,6 +27,7 @@ const DashboardPage: React.FC = () => {
   const [profiles, setProfiles] = useState<QualityProfile[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [progress, setProgress] = useState<SyncProgress | null>(null);
   const lastRunId = useRef<number | null>(null);
 
   const load = useCallback(async () => {
@@ -51,37 +56,64 @@ const DashboardPage: React.FC = () => {
       .catch(() => setProfiles(null));
   }, [load]);
 
-  // While a sync runs, watch for it to finish and report what it did. This also
+  // While a sync runs, follow it and report what it did at the end. This also
   // picks up syncs started by the scheduler, not just from this page.
+  //
+  // Long polled rather than asked on a timer: each request is held open by the
+  // server until the round moves, so the banner follows it film by film without
+  // a request per second, and a quiet round costs one request every twenty-five.
   useEffect(() => {
     if (!syncing) return;
 
-    const timer = setInterval(async () => {
-      let status;
-      try {
-        status = await syncAPI.getStatus();
-      } catch {
-        return; // transient; try again on the next tick
-      }
-      if (status.running) return;
+    const controller = new AbortController();
+    // Checked before every state change as well as at the top of the loop: an
+    // unmount during a request in flight must not set state on the way out
+    let stopped = false;
 
-      setSyncing(false);
-      const finished = status.last;
-      if (finished && finished.id !== lastRunId.current) {
-        if (finished.error) {
-          toast.error(`Sync failed: ${finished.error}`);
-        } else {
-          toast.success(
-            finished.added > 0
-              ? `Sync finished, added ${finished.added} movie${finished.added === 1 ? '' : 's'}`
-              : 'Sync finished, nothing new to add'
-          );
+    const follow = async () => {
+      // -1 is a version no round has, so the first request answers at once
+      // rather than holding for a round that may have finished already
+      let version = -1;
+
+      while (!stopped) {
+        let next: SyncProgress;
+        try {
+          next = await syncAPI.getProgress(version, controller.signal);
+        } catch {
+          if (stopped) return;
+          await new Promise(resolve => setTimeout(resolve, SYNC_RETRY_MS));
+          continue;
         }
-      }
-      load();
-    }, SYNC_POLL_MS);
+        if (stopped) return;
 
-    return () => clearInterval(timer);
+        version = next.version;
+        setProgress(next);
+        if (next.running) continue;
+
+        setSyncing(false);
+        const finished = next.last;
+        if (finished && finished.id !== lastRunId.current) {
+          if (finished.error) {
+            toast.error(`Sync failed: ${finished.error}`);
+          } else {
+            toast.success(
+              finished.added > 0
+                ? `Sync finished, added ${finished.added} movie${finished.added === 1 ? '' : 's'}`
+                : 'Sync finished, nothing new to add'
+            );
+          }
+        }
+        load();
+        return;
+      }
+    };
+
+    follow();
+
+    return () => {
+      stopped = true;
+      controller.abort();
+    };
   }, [syncing, load]);
 
   const runSync = async () => {
@@ -116,7 +148,9 @@ const DashboardPage: React.FC = () => {
   };
 
   const syncDetail = () => {
-    if (syncing) return 'Reading your lists from Letterboxd';
+    // What it is actually doing is on the banner above, phase by phase; naming
+    // one phase here was wrong for three quarters of every round
+    if (syncing) return 'A sync is running';
     if (!lastSync) return 'No sync has run yet';
     if (lastSync.error) return lastSync.error;
 
@@ -173,6 +207,11 @@ const DashboardPage: React.FC = () => {
             {syncing ? 'Syncing...' : 'Run Sync Now'}
           </button>
         </div>
+
+        {/* Only while a round runs, and only once its first progress has
+            arrived: an empty banner between pressing the button and the first
+            answer would jump the cards down and back up again */}
+        {syncing && progress?.running && <SyncStatusBanner progress={progress} />}
 
         {/* Status Cards */}
         <div className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">

@@ -1,6 +1,8 @@
+import asyncio
 import logging
 import math
 import os
+import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import List, Dict, NamedTuple, Optional
@@ -944,6 +946,60 @@ async def get_sync_status(current_user: dict = Depends(context.get_current_user)
         "started_at": running["started_at"] if running else None,
         "last": context.sync_instance.db.get_last_sync_run()
     }
+
+# How often the long poll below looks at the progress record, and how long it
+# will hold a request that has nothing to report.
+PROGRESS_POLL_SECONDS = 0.25
+PROGRESS_HOLD_SECONDS = 25
+
+
+@context.app.get("/api/sync/progress")
+async def get_sync_progress(version: int = -1,
+                            current_user: dict = Depends(context.get_current_user)):
+    """Where the running round has got to, held open until that changes
+
+    Long polled rather than polled on a timer: a round moves a film a second
+    through phases that are minutes long, and a timer fast enough to follow
+    that would be a request every second of a quarter-hour round, nearly all of
+    them answering nothing new. The caller says which version it has already
+    seen and this holds its request until there is a newer one.
+
+    A caller that has fallen behind is answered at once, since the version it
+    asks about is not the current one — which is also what makes the first call,
+    with no version at all, answer immediately rather than waiting for a round
+    that may not be running.
+
+    Declared async on purpose. FastAPI runs the plain `def` endpoints in a
+    worker pool of a few dozen threads, and a handler that blocks for the whole
+    hold would take one of them per open browser tab; this one gives the loop
+    back between looks.
+
+    It looks at an integer every quarter-second rather than waiting on an event
+    the sync thread sets. The record is written from a plain thread, and waking
+    an asyncio waiter from one means holding the right event loop and calling
+    into it threadsafely; comparing a counter costs nothing and cannot go wrong
+    across that boundary.
+
+    Answers after twenty-five seconds even with nothing to say, so the proxy in
+    front of the application never cuts a connection it thinks has died. The
+    caller asks again with the version it just got, and nothing is missed in
+    between: the version it holds is the one it is asking about.
+    """
+    if not context.sync_instance:
+        raise HTTPException(status_code=404, detail="Sync instance not available")
+
+    progress = context.sync_instance.progress
+    deadline = time.monotonic() + PROGRESS_HOLD_SECONDS
+
+    snapshot = progress.snapshot()
+    while snapshot['version'] == version and time.monotonic() < deadline:
+        await asyncio.sleep(PROGRESS_POLL_SECONDS)
+        snapshot = progress.snapshot()
+
+    # The finished run travels with the round ending, so a caller watching a
+    # sync has what it needs to report how the sync went without asking again
+    return {**snapshot, "last": context.sync_instance.db.get_last_sync_run()}
+
 
 @context.app.get("/api/dashboard")
 async def get_dashboard(current_user: dict = Depends(context.get_current_user)):

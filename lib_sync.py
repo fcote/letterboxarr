@@ -6,6 +6,7 @@ from lib_db import Database, get_database
 from lib_letterboxd import LetterboxdScraper
 from lib_radarr import RadarrAPI, MultipleMatchesError
 from lib_config import Config
+from lib_progress import PHASE_RADARR, SyncProgress
 from lib_refresh import ListRefresher
 
 
@@ -22,7 +23,11 @@ class LetterboxarrSync:
         self.config = config
         self.db = db or get_database(logger)
         self.letterboxd = LetterboxdScraper(logger, self.db)
-        self.refresher = ListRefresher(logger, config, self.letterboxd, self.db)
+        # One record of where the round is, shared with the refresher that runs
+        # three of its four phases
+        self.progress = SyncProgress()
+        self.refresher = ListRefresher(logger, config, self.letterboxd, self.db,
+                                       self.progress)
         self.radarr = RadarrAPI(
             logger,
             config.radarr.url,
@@ -67,6 +72,10 @@ class LetterboxarrSync:
             return
 
         run_id = self.db.start_sync_run()
+        # Counted over the phases this round will actually run, not over the
+        # four a refreshing one has: a sync that only hands stored films to
+        # Radarr would otherwise call itself step 2 of 4 and stop there
+        self.progress.start(steps=4 if refresh else 1)
         added = considered = 0
         error = None
         try:
@@ -90,6 +99,9 @@ class LetterboxarrSync:
             raise
         finally:
             self.db.finish_sync_run(run_id, added=added, considered=considered, error=error)
+            # Before the lock, so that anything woken by the round ending finds
+            # a sync it can start rather than one still holding the lock
+            self.progress.finish()
             self.sync_lock.release()
 
     def _sync(self) -> Tuple[int, int]:
@@ -104,14 +116,18 @@ class LetterboxarrSync:
 
         if not movies:
             self.logger.warning("No movies found in any watch lists")
+            self.progress.begin(PHASE_RADARR, 0)
             return 0, 0
 
         # Read the whole set once: the loop below checks it for every movie
         processed_ids, processed_slugs = self.db.get_added_keys()
 
+        self.progress.begin(PHASE_RADARR, len(movies))
+
         # Process each movie
         added_count = 0
-        for movie in movies:
+        for index, movie in enumerate(movies):
+            self.progress.step_item(movie['title'], index)
             # Create unique identifier
             movie_id = movie_key(movie)
 
@@ -146,6 +162,7 @@ class LetterboxarrSync:
                 tags = movie.get('tags', [])
                 if self.radarr.add_movie(radarr_movie, tags):
                     added_count += 1
+                    self.progress.add()
                 # Mark as processed
                 self.mark_processed(movie_id, slug=movie['letterboxd_slug'],
                                     title=movie['title'], year=movie.get('year'), tags=tags)
@@ -156,6 +173,7 @@ class LetterboxarrSync:
             # Small delay between additions
             time.sleep(0.5)
 
+        self.progress.finish_phase()
         self.logger.info(f"Sync complete. Added {added_count} new movies")
         return added_count, len(movies)
 
