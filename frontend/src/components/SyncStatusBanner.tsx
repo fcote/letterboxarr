@@ -5,6 +5,7 @@ import { ProgressTrack } from './CategoryProgress';
 
 interface SyncStatusBannerProps {
   progress: SyncProgress;
+  embedded?: boolean;
 }
 
 // A round is four phases long and the slow ones are a page a second, so a sync
@@ -15,7 +16,7 @@ interface SyncStatusBannerProps {
 // It is only rendered while a round runs, so there is no idle state to design:
 // it appears when one starts, whether or not this browser was what started it,
 // and goes when it ends.
-const SyncStatusBanner: React.FC<SyncStatusBannerProps> = ({ progress }) => {
+const SyncStatusBanner: React.FC<SyncStatusBannerProps> = ({ progress, embedded = false }) => {
   const { label, item, done, total, step, steps, added } = progress;
 
   // A phase with nothing due — release dates already current, say — is still a
@@ -23,8 +24,8 @@ const SyncStatusBanner: React.FC<SyncStatusBannerProps> = ({ progress }) => {
   const share = total > 0 ? done / total : 1;
 
   return (
-    <div className="card mt-6 p-4" role="status" aria-live="polite">
-      <div className="flex items-baseline gap-3">
+    <div className={embedded ? 'mt-5 border-t border-dark-border/50 pt-4' : 'card mt-6 p-4'} role="status" aria-live="polite">
+      <div className="flex flex-wrap items-baseline gap-3">
         {/* Self-evident from the moving bar below, so kept out of the reading */}
         <ArrowPathIcon className="h-4 w-4 flex-shrink-0 animate-spin text-brand-blue self-center" aria-hidden="true" />
 
@@ -36,7 +37,7 @@ const SyncStatusBanner: React.FC<SyncStatusBannerProps> = ({ progress }) => {
             it changes every second or so, and a line that reflows as it goes
             would move the counts beside it. */}
         {item && (
-          <p className="min-w-0 flex-1 truncate text-sm text-dark-text-muted" title={item}>
+          <p className="min-w-0 basis-full truncate text-sm text-dark-text-muted sm:flex-1" title={item}>
             · {item}
           </p>
         )}

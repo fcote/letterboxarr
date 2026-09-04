@@ -363,7 +363,7 @@ const UpcomingPage: React.FC = () => {
 
   return (
     <Layout>
-      <div className="px-4 py-6 sm:px-0">
+      <div className="py-6 lg:py-8">
         <div className="border-b border-dark-border pb-5 flex justify-between items-start gap-4">
           <div className="min-w-0">
             <h1 className="text-2xl font-bold leading-6 text-dark-text-primary">Upcoming</h1>

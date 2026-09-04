@@ -315,7 +315,7 @@ const WatchItemsPage: React.FC = () => {
 
     if (state.watched === null) {
       return note(`${state.total} movies`,
-                  'Set your Letterboxd username in Configuration to see how much of this '
+                  'Set your Letterboxd username in Settings to see how much of this '
                   + 'list you have watched.');
     }
 
@@ -557,10 +557,10 @@ const WatchItemsPage: React.FC = () => {
 
   return (
     <Layout>
-      <div className="px-4 py-6 sm:px-0">
+      <div className="py-6 lg:py-8">
         <div className="border-b border-dark-border pb-5 flex justify-between items-center">
           <div>
-            <h1 className="text-2xl font-bold leading-6 text-dark-text-primary">Watch Items</h1>
+            <h1 className="text-2xl font-bold leading-6 text-dark-text-primary">Watch lists</h1>
             <p className="mt-2 max-w-4xl text-sm text-dark-text-muted">
               Manage your Letterboxd lists to sync with Radarr.
             </p>

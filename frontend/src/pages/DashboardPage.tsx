@@ -1,18 +1,20 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { configAPI, dashboardAPI, radarrAPI, syncAPI } from '../utils/api';
-import { Config, DashboardSummary, QualityProfile, SyncProgress, SyncRun } from '../types';
+import { configAPI, dashboardAPI, radarrAPI, syncAPI, watchItemsAPI } from '../utils/api';
+import { Config, DashboardSummary, QualityProfile, SyncProgress, SyncRun, WatchItemsPage } from '../types';
 import toast from 'react-hot-toast';
+import { isAxiosError } from 'axios';
 import Layout from '../components/Layout';
 import SyncStatusBanner from '../components/SyncStatusBanner';
 import { relativeTime, duration } from '../utils/time';
+import { watchItemPath } from '../utils/letterboxd';
 import {
   CheckCircleIcon,
   ClockIcon,
   ExclamationCircleIcon,
-  EyeIcon,
   FilmIcon,
-  PlayIcon
+  ArrowPathIcon,
+  ArrowRightIcon
 } from '@heroicons/react/24/outline';
 
 // How long to wait before asking again after a failed request. The progress
@@ -25,19 +27,32 @@ const DashboardPage: React.FC = () => {
   const [config, setConfig] = useState<Config | null>(null);
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [profiles, setProfiles] = useState<QualityProfile[] | null>(null);
+  const [lists, setLists] = useState<WatchItemsPage | null>(null);
+  const [configMissing, setConfigMissing] = useState(false);
+  const [starting, setStarting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [progress, setProgress] = useState<SyncProgress | null>(null);
   const lastRunId = useRef<number | null>(null);
 
   const load = useCallback(async () => {
-    const [configData, summaryData] = await Promise.all([
-      configAPI.get().catch(() => null),
-      dashboardAPI.get().catch(() => null)
+    const [configData, summaryData, listData] = await Promise.all([
+      configAPI.get().then(data => {
+        setConfigMissing(false);
+        return data;
+      }).catch(error => {
+        setConfigMissing(isAxiosError(error) && error.response?.status === 404);
+        return null;
+      }),
+      dashboardAPI.get().catch(() => null),
+      watchItemsAPI.getPage({
+        offset: 0, limit: 4, search: '', auto_add: 'all', tags: [], sort: 'config'
+      }).catch(() => null)
     ]);
 
     setConfig(configData);
     setSummary(summaryData);
+    setLists(listData);
 
     if (summaryData) {
       setSyncing(summaryData.sync.running);
@@ -117,6 +132,8 @@ const DashboardPage: React.FC = () => {
   }, [syncing, load]);
 
   const runSync = async () => {
+    setStarting(true);
+    setProgress(null);
     try {
       await syncAPI.run();
       setSyncing(true);
@@ -125,14 +142,17 @@ const DashboardPage: React.FC = () => {
       toast.error(error.response?.data?.detail || 'Failed to start sync');
       // A 409 means one is already going, so follow that one instead
       if (error.response?.status === 409) setSyncing(true);
+    } finally {
+      setStarting(false);
     }
   };
 
   if (loading) {
     return (
       <Layout>
-        <div className="flex justify-center items-center h-64">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-blue"></div>
+        <div className="flex h-64 items-center justify-center gap-3 text-sm text-dark-text-muted" role="status">
+          <ArrowPathIcon className="h-5 w-5 animate-spin text-brand-blue" aria-hidden="true" />
+          Loading your overview…
         </div>
       </Layout>
     );
@@ -140,281 +160,173 @@ const DashboardPage: React.FC = () => {
 
   const lastSync: SyncRun | null = summary?.sync.last ?? null;
   const qualityProfile = profiles?.find(profile => profile.id === config?.radarr.quality_profile);
-
-  const syncSummary = () => {
-    if (syncing) return 'Running now';
-    if (!lastSync) return 'Never';
-    return relativeTime(lastSync.finished_at ?? lastSync.started_at);
-  };
+  const busy = syncing || starting;
+  const failed = Boolean(lastSync && (lastSync.error || !lastSync.finished_at));
+  const StatusIcon = !summary || failed ? ExclamationCircleIcon : lastSync ? CheckCircleIcon : ClockIcon;
+  const statusTitle = !summary
+    ? 'Sync status unavailable'
+    : busy ? 'Sync in progress'
+      : lastSync?.error ? 'Last sync needs attention'
+        : lastSync?.finished_at ? 'Last sync completed'
+          : lastSync ? 'Previous sync interrupted' : 'Ready for your first sync';
 
   const syncDetail = () => {
-    // What it is actually doing is on the banner above, phase by phase; naming
-    // one phase here was wrong for three quarters of every round
-    if (syncing) return 'A sync is running';
-    if (!lastSync) return 'No sync has run yet';
+    if (!summary) return 'Could not load sync status. Try again to check your latest run.';
+    if (busy) return 'Following your lists, films, release dates and ratings.';
+    if (!lastSync) return 'Run a sync to read your watch lists and send new films to Radarr.';
     if (lastSync.error) return lastSync.error;
-
-    const took = lastSync.finished_at ? duration(lastSync.finished_at - lastSync.started_at) : null;
-    const added = `${lastSync.added} added of ${lastSync.considered} found`;
-    return took ? `${added}, took ${took}` : added;
+    if (!lastSync.finished_at) return 'The previous sync did not finish. Run a sync to try again.';
+    return `${lastSync.added} added of ${lastSync.considered} found · ${relativeTime(lastSync.finished_at)} · Took ${duration(lastSync.finished_at - lastSync.started_at)}`;
   };
 
-  const statCard = (
-    key: string,
-    label: string,
-    value: React.ReactNode,
-    detail: React.ReactNode,
-    icon: React.ReactNode
-  ) => (
-    <div key={key} className="card overflow-hidden">
-      <div className="p-5">
-        <div className="flex items-center">
-          <div className="flex-shrink-0">{icon}</div>
-          <div className="ml-5 w-0 flex-1">
-            <dl>
-              <dt className="text-sm font-medium text-dark-text-muted truncate">{label}</dt>
-              <dd className="text-lg font-medium text-dark-text-primary">{value}</dd>
-            </dl>
-          </div>
-        </div>
-        <p className="mt-2 text-xs text-dark-text-muted truncate" title={typeof detail === 'string' ? detail : undefined}>
-          {detail}
-        </p>
-      </div>
-    </div>
-  );
+  const filters = config ? [
+    config.letterboxd.filters.skip_documentaries && 'Documentaries',
+    config.letterboxd.filters.skip_short_films && 'Short films',
+    config.letterboxd.filters.skip_unreleased && 'Unreleased films',
+    config.letterboxd.filters.skip_tv_shows && 'TV shows'
+  ].filter(Boolean) : [];
 
   return (
     <Layout>
-      <div className="px-4 py-6 sm:px-0">
-        <div className="border-b border-dark-border pb-5 flex justify-between items-start gap-4">
+      <div className="py-6 lg:py-8">
+        <header className="flex flex-wrap items-start justify-between gap-5">
           <div>
-            <h1 className="text-2xl font-bold leading-6 text-dark-text-primary">Dashboard</h1>
-            <p className="mt-2 max-w-4xl text-sm text-dark-text-muted">
-              Overview of your Letterboxarr sync status and configuration.
-            </p>
+            <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Your film pipeline.</h1>
+            <p className="mt-3 text-sm text-dark-text-muted">A little less managing. A little more cinema.</p>
           </div>
-          <button
-            onClick={runSync}
-            disabled={syncing || !summary}
-            className="btn-primary flex flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {syncing ? (
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-            ) : (
-              <PlayIcon className="w-4 mr-2" />
-            )}
-            {syncing ? 'Syncing...' : 'Run Sync Now'}
+          <button onClick={runSync} disabled={busy || !summary} className="btn-primary inline-flex items-center gap-2 text-sm">
+            <ArrowPathIcon className={`h-4 w-4 ${busy ? 'animate-spin' : ''}`} aria-hidden="true" />
+            {busy ? 'Syncing…' : 'Sync now'}
           </button>
-        </div>
+        </header>
 
-        {/* Only while a round runs, and only once its first progress has
-            arrived: an empty banner between pressing the button and the first
-            answer would jump the cards down and back up again */}
-        {syncing && progress?.running && <SyncStatusBanner progress={progress} />}
-
-        {/* Status Cards */}
-        <div className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
-          {statCard(
-            'sync',
-            'Last Sync',
-            syncSummary(),
-            syncDetail(),
-            lastSync?.error && !syncing
-              ? <ExclamationCircleIcon className="h-6 w-6 text-brand-orange" />
-              : <ClockIcon className="h-6 w-6 text-brand-blue" />
-          )}
-          {statCard(
-            'items',
-            'Watch Items',
-            summary?.watch_items ?? 0,
-            <Link to="/watch-items" className="text-brand-blue hover:text-brand-blue/80">
-              Manage lists
-            </Link>,
-            <FilmIcon className="h-6 w-6 text-dark-text-muted" />
-          )}
-          {statCard(
-            'added',
-            'Added to Radarr',
-            summary?.added_to_radarr ?? 0,
-            summary && summary.added_last_week > 0
-              ? `${summary.added_last_week} in the last 7 days`
-              : 'None in the last 7 days',
-            <CheckCircleIcon className="h-6 w-6 text-brand-green" />
-          )}
-          {statCard(
-            'watched',
-            'Films Watched',
-            summary?.watched ?? '—',
-            summary?.watched == null
-              ? 'Set a Letterboxd username to track this'
-              : `On letterboxd.com/${config?.letterboxd.username}`,
-            <EyeIcon className="h-6 w-6 text-brand-blue" />
-          )}
-        </div>
-
-        {/* Recently added to Radarr */}
-        {summary && summary.recently_added.length > 0 && (
-          <div className="mt-6 card overflow-hidden">
-            <div className="px-4 py-5 sm:px-6">
-              <h3 className="text-lg leading-6 font-medium text-dark-text-primary">
-                Recently Added to Radarr
-              </h3>
-              <p className="mt-1 max-w-2xl text-sm text-dark-text-muted">
-                The most recent movies this sync handed to Radarr.
-              </p>
-            </div>
-            <ul className="border-t border-dark-border divide-y divide-dark-border">
-              {summary.recently_added.map(movie => (
-                <li key={movie.movie_id} className="px-4 py-3 sm:px-6">
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex items-center min-w-0">
-                      <FilmIcon className="h-5 w-5 text-dark-text-muted mr-3 flex-shrink-0" />
-                      <p className="text-sm font-medium text-dark-text-primary truncate">
-                        {movie.letterboxd_slug ? (
-                          <a
-                            href={`https://letterboxd.com/film/${movie.letterboxd_slug}/`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="hover:text-brand-blue"
-                          >
-                            {movie.title}{movie.year ? ` (${movie.year})` : ''}
-                          </a>
-                        ) : (
-                          <>{movie.title}{movie.year ? ` (${movie.year})` : ''}</>
-                        )}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      {movie.tags.map((tag, index) => (
-                        <span
-                          key={index}
-                          className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-brand-blue/20 text-brand-blue border border-brand-blue/30"
-                        >
-                          {tag}
-                        </span>
-                      ))}
-                      <span className="text-xs text-dark-text-muted whitespace-nowrap">
-                        {relativeTime(movie.added_at)}
-                      </span>
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {/* Current Configuration Summary */}
-        {config && (
-          <div className="mt-6 card overflow-hidden">
-            <div className="px-4 py-5 sm:px-6 flex items-center justify-between gap-4">
-              <div>
-                <h3 className="text-lg leading-6 font-medium text-dark-text-primary">Current Configuration</h3>
-                <p className="mt-1 max-w-2xl text-sm text-dark-text-muted">
-                  Summary of your current sync configuration.
-                </p>
-              </div>
-              <Link to="/config" className="btn-secondary text-sm flex-shrink-0">
-                Edit
-              </Link>
-            </div>
-            <div className="border-t border-dark-border px-4 py-5 sm:p-0">
-              <dl className="sm:divide-y sm:divide-dark-border">
-                <div className="py-4 sm:py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
-                  <dt className="text-sm font-medium text-dark-text-muted">Radarr URL</dt>
-                  <dd className="mt-1 text-sm text-dark-text-primary sm:mt-0 sm:col-span-2">
-                    {config.radarr.url}
-                  </dd>
-                </div>
-                <div className="py-4 sm:py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
-                  <dt className="text-sm font-medium text-dark-text-muted">Quality Profile</dt>
-                  <dd className="mt-1 text-sm text-dark-text-primary sm:mt-0 sm:col-span-2">
-                    {qualityProfile ? qualityProfile.name : `Profile ${config.radarr.quality_profile}`}
-                  </dd>
-                </div>
-                <div className="py-4 sm:py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
-                  <dt className="text-sm font-medium text-dark-text-muted">Root Folder</dt>
-                  <dd className="mt-1 text-sm text-dark-text-primary sm:mt-0 sm:col-span-2">
-                    {config.radarr.root_folder}
-                  </dd>
-                </div>
-                <div className="py-4 sm:py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
-                  <dt className="text-sm font-medium text-dark-text-muted">Sync Interval</dt>
-                  <dd className="mt-1 text-sm text-dark-text-primary sm:mt-0 sm:col-span-2">
-                    Every {config.sync.interval_minutes} minutes
-                  </dd>
-                </div>
-                <div className="py-4 sm:py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
-                  <dt className="text-sm font-medium text-dark-text-muted">Lists</dt>
-                  <dd className="mt-1 text-sm text-dark-text-primary sm:mt-0 sm:col-span-2">
-                    {summary?.lists_refreshed_at != null
-                      ? `Last read from Letterboxd ${relativeTime(summary.lists_refreshed_at)}`
-                      : 'Not read from Letterboxd yet'}
-                  </dd>
-                </div>
-                <div className="py-4 sm:py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
-                  <dt className="text-sm font-medium text-dark-text-muted">Global Filters</dt>
-                  <dd className="mt-1 text-sm text-dark-text-primary sm:mt-0 sm:col-span-2">
-                    <div className="flex flex-wrap gap-2">
-                      {config.letterboxd.filters.skip_documentaries && (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-dark-bg-tertiary text-dark-text-primary border border-dark-border">
-                          Skip Documentaries
-                        </span>
-                      )}
-                      {config.letterboxd.filters.skip_short_films && (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-dark-bg-tertiary text-dark-text-primary border border-dark-border">
-                          Skip Short Films
-                        </span>
-                      )}
-                      {config.letterboxd.filters.skip_unreleased && (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-dark-bg-tertiary text-dark-text-primary border border-dark-border">
-                          Skip Unreleased
-                        </span>
-                      )}
-                      {config.letterboxd.filters.skip_tv_shows && (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-dark-bg-tertiary text-dark-text-primary border border-dark-border">
-                          Skip TV Shows
-                        </span>
-                      )}
-                      {!config.letterboxd.filters.skip_documentaries &&
-                        !config.letterboxd.filters.skip_short_films &&
-                        !config.letterboxd.filters.skip_unreleased &&
-                        !config.letterboxd.filters.skip_tv_shows && (
-                          <span className="text-sm text-dark-text-muted">None, everything is synced</span>
-                        )}
-                    </div>
-                  </dd>
-                </div>
-              </dl>
-            </div>
-          </div>
-        )}
-
-        {/* No Configuration Warning */}
         {!config && (
-          <div className="mt-6 bg-brand-orange/10 border border-brand-orange/20 rounded-md p-4">
-            <div className="flex">
-              <div className="flex-shrink-0">
-                <ExclamationCircleIcon className="h-5 w-5 text-brand-orange" />
-              </div>
-              <div className="ml-3">
-                <h3 className="text-sm font-medium text-brand-orange">Configuration Required</h3>
-                <div className="mt-2 text-sm text-dark-text-secondary">
-                  <p>
-                    No configuration found. Please set up your Radarr connection and Letterboxd settings
-                    in the configuration page to get started.
-                  </p>
-                </div>
-                <div className="mt-4">
-                  <Link to="/config" className="btn-secondary text-sm">
-                    Configure Now
-                  </Link>
-                </div>
-              </div>
-            </div>
-          </div>
+          <section className="mt-7 rounded-lg border border-brand-orange/30 bg-brand-orange/10 p-5" aria-label="Configuration notice">
+            <h2 className="text-sm font-semibold text-brand-orange">{configMissing ? 'Set up your film pipeline' : 'Settings unavailable'}</h2>
+            <p className="mt-2 text-sm text-dark-text-secondary">
+              {configMissing
+                ? 'Configure Radarr and your Letterboxd watch lists to get started.'
+                : 'Could not load your settings. Open settings to try again.'}
+            </p>
+            <Link to="/config" className="mt-3 inline-flex items-center gap-2 text-sm text-brand-blue">
+              Open settings <ArrowRightIcon className="h-4 w-4" aria-hidden="true" />
+            </Link>
+          </section>
         )}
+
+        <section className="card mt-7 p-5 sm:p-6" aria-label="Sync status">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0 basis-full sm:flex-1" role="status">
+              <div className="flex items-center gap-2.5">
+                {busy
+                  ? <ArrowPathIcon className="h-5 w-5 flex-shrink-0 animate-spin text-brand-blue" aria-hidden="true" />
+                  : <StatusIcon className={`h-5 w-5 flex-shrink-0 ${!summary || failed ? 'text-brand-orange' : lastSync?.finished_at ? 'text-brand-green' : 'text-brand-blue'}`} aria-hidden="true" />}
+                <h2 className="text-base font-semibold">{statusTitle}</h2>
+              </div>
+              <p className="mt-2 break-words text-xs leading-relaxed text-dark-text-muted sm:ml-7">{syncDetail()}</p>
+              {!summary && <button onClick={() => { setLoading(true); load().finally(() => setLoading(false)); }} className="btn-secondary mt-3 text-xs">Try again</button>}
+            </div>
+            {config && <div className="text-xs sm:text-right"><p className="text-dark-text-muted">Sync interval</p><p className="mt-1 text-dark-text-secondary">Every {config.sync.interval_minutes} minutes</p></div>}
+          </div>
+          {syncing && progress?.running && <SyncStatusBanner progress={progress} embedded />}
+        </section>
+
+        <dl className="my-8 grid grid-cols-3 divide-x divide-dark-border/50 sm:my-10">
+          <div className="min-w-0 pr-3 sm:pr-6">
+            <dt className="text-xs text-dark-text-muted sm:text-sm">Added to Radarr</dt>
+            <dd className="mt-2 text-2xl font-semibold tracking-tight sm:text-4xl">{summary?.added_to_radarr.toLocaleString() ?? '—'}</dd>
+            <dd className="mt-2 text-xs text-brand-green">{summary ? `${summary.added_last_week.toLocaleString()} in the last 7 days` : 'Count unavailable'}</dd>
+          </div>
+          <div className="min-w-0 px-3 sm:px-6">
+            <dt className="text-xs text-dark-text-muted sm:text-sm">Watch lists</dt>
+            <dd className="mt-2 text-2xl font-semibold tracking-tight sm:text-4xl">{summary?.watch_items.toLocaleString() ?? '—'}</dd>
+            <dd className="mt-2 text-xs"><Link to="/watch-items" className="text-brand-blue hover:underline">Manage lists</Link></dd>
+          </div>
+          <div className="min-w-0 pl-3 sm:pl-6">
+            <dt className="text-xs text-dark-text-muted sm:text-sm">Films watched</dt>
+            <dd className="mt-2 text-2xl font-semibold tracking-tight sm:text-4xl">{summary?.watched?.toLocaleString() ?? '—'}</dd>
+            <dd className="mt-2 break-words text-xs text-dark-text-muted">
+              {!summary ? 'Count unavailable' : summary.watched == null
+                ? <Link to="/config" className="text-brand-blue hover:underline">Set your Letterboxd username</Link>
+                : 'On Letterboxd'}
+            </dd>
+          </div>
+        </dl>
+
+        <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+          <section aria-labelledby="recent-heading" className="min-w-0">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h2 id="recent-heading" className="text-lg font-semibold tracking-tight">Recently added</h2>
+              <span className="text-xs text-dark-text-muted">Sent to Radarr</span>
+            </div>
+            {summary && summary.recently_added.length > 0 ? (
+              <ul className="divide-y divide-dark-border/40">
+                {summary.recently_added.map(movie => (
+                  <li key={movie.movie_id} className="flex items-center gap-3 py-4">
+                    <div className="flex h-14 w-10 flex-shrink-0 items-center justify-center rounded border border-dark-border/50 bg-dark-bg-secondary">
+                      <FilmIcon className="h-5 w-5 text-brand-blue" aria-hidden="true" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <h3 className="break-words text-sm font-medium">
+                        {movie.letterboxd_slug ? <a href={`https://letterboxd.com/film/${movie.letterboxd_slug}/`} target="_blank" rel="noopener noreferrer" className="hover:text-brand-blue">{movie.title}</a> : movie.title}
+                      </h3>
+                      <p className="mt-1 text-xs text-dark-text-muted">{movie.year ? `${movie.year} · ` : ''}Added {relativeTime(movie.added_at)}</p>
+                      {movie.tags.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{movie.tags.map(tag => <span key={tag} className="max-w-full break-words rounded border border-brand-blue/20 bg-brand-blue/5 px-2 py-0.5 text-xs text-brand-blue">{tag}</span>)}</div>}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="rounded-lg border border-dashed border-dark-border/60 px-5 py-10">
+                <FilmIcon className="mb-3 h-7 w-7 text-dark-text-muted" aria-hidden="true" />
+                <h3 className="text-sm font-medium">{summary ? 'No films added yet' : 'Recent additions unavailable'}</h3>
+                <p className="mt-2 text-sm text-dark-text-muted">{!summary ? 'Try loading the sync status again to see recent films.' : summary.watch_items === 0 ? 'Add a watch list to start sending films to Radarr.' : 'Films will appear here after a sync sends them to Radarr.'}</p>
+              </div>
+            )}
+          </section>
+
+          <aside className="card min-w-0 p-5 sm:p-6" aria-labelledby="lists-heading">
+            <div className="flex items-center justify-between gap-3">
+              <h2 id="lists-heading" className="text-lg font-semibold tracking-tight">Your lists</h2>
+              <Link to="/watch-items" className="text-xs text-brand-blue hover:underline">View all{lists ? ` (${lists.total})` : ''}</Link>
+            </div>
+            {lists && lists.items.length > 0 ? (
+              <ul className="mt-2 divide-y divide-dark-border/40">
+                {lists.items.map(item => (
+                  <li key={item.id ?? item.path} className="py-4 last:pb-0">
+                    <Link to={item.id != null ? `/movies/${item.id}` : '/watch-items'} className="block break-words text-sm font-medium hover:text-brand-blue">{item.name || watchItemPath(item)}</Link>
+                    <p className="mt-1.5 text-xs text-dark-text-muted">
+                      {item.progress?.read ? `${item.progress.total.toLocaleString()} films · ` : ''}
+                      {item.last_refreshed != null ? `Read ${relativeTime(item.last_refreshed)}` : 'Not read from Letterboxd yet'}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="mt-4 text-sm text-dark-text-muted">
+                <p>{lists ? 'Add a Letterboxd list, watchlist or film collection to start following its films.' : 'Could not load your watch lists. Open watch lists to try again.'}</p>
+                <Link to="/watch-items" className="mt-4 inline-flex items-center gap-2 text-brand-blue">{lists ? 'Add a watch list' : 'Open watch lists'}<ArrowRightIcon className="h-4 w-4" aria-hidden="true" /></Link>
+              </div>
+            )}
+          </aside>
+        </div>
+
+        {config && (
+          <details className="mt-9 border-t border-dark-border/50 pt-5">
+            <summary className="cursor-pointer text-sm font-medium text-dark-text-secondary">Sync settings <span className="ml-2 text-xs font-normal text-dark-text-muted">{qualityProfile?.name ?? `Profile ${config.radarr.quality_profile}`} · Every {config.sync.interval_minutes} minutes</span></summary>
+            <dl className="mt-5 grid gap-5 text-sm sm:grid-cols-2">
+              <div><dt className="text-xs text-dark-text-muted">Radarr URL</dt><dd className="mt-1 break-all">{config.radarr.url}</dd></div>
+              <div><dt className="text-xs text-dark-text-muted">Root folder</dt><dd className="mt-1 break-all">{config.radarr.root_folder}</dd></div>
+              <div><dt className="text-xs text-dark-text-muted">Lists last read</dt><dd className="mt-1">{summary ? summary.lists_refreshed_at != null ? relativeTime(summary.lists_refreshed_at) : 'Not read from Letterboxd yet' : 'Read time unavailable'}</dd></div>
+              <div><dt className="text-xs text-dark-text-muted">Skipped categories</dt><dd className="mt-1">{filters.length ? filters.join(', ') : 'None, all categories are synced'}</dd></div>
+            </dl>
+            <Link to="/config" className="mt-5 inline-flex items-center gap-2 text-sm text-brand-blue">Edit settings <ArrowRightIcon className="h-4 w-4" aria-hidden="true" /></Link>
+          </details>
+        )}
+        <footer className="mt-7 flex flex-wrap items-center justify-between gap-3 text-xs text-dark-text-muted">
+          <span>Letterboxd → Letterboxarr → Radarr</span>
+          <Link to="/upcoming" className="inline-flex items-center gap-2 hover:text-brand-blue">Explore upcoming releases <ArrowRightIcon className="h-3 w-3" aria-hidden="true" /></Link>
+        </footer>
       </div>
     </Layout>
   );
