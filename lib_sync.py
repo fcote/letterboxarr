@@ -2,11 +2,11 @@ import time
 from threading import Event, Lock, Thread
 from typing import Dict, List, Optional, Tuple
 
+from lib_config import Config
 from lib_db import Database, get_database
 from lib_letterboxd import LetterboxdScraper
-from lib_radarr import RadarrAPI, MultipleMatchesError
-from lib_config import Config
 from lib_progress import PHASE_RADARR, SyncProgress
+from lib_radarr import MultipleMatchesError, RadarrAPI
 from lib_refresh import ListRefresher
 
 

@@ -17,7 +17,7 @@ const ConfigPage: React.FC = () => {
     try {
       const config = await configAPI.get();
       reset(config);
-    } catch (error: any) {
+    } catch {
       toast.error('Failed to load configuration');
     } finally {
       setLoading(false);

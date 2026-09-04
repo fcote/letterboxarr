@@ -10,7 +10,6 @@ import time
 from threading import Lock
 from typing import Dict, Optional
 
-
 # The phases of a round, in the order they run, with what the dashboard calls
 # them. A round that is not refreshing runs only the Radarr phase, which is why
 # the step number is counted over the phases a round will actually run rather

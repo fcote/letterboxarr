@@ -30,7 +30,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       try {
         const payload = JSON.parse(atob(token.split('.')[1]));
         setUser({ username: payload.sub });
-      } catch (error) {
+      } catch {
         localStorage.removeItem('token');
       }
     }
@@ -38,16 +38,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const login = async (credentials: LoginCredentials) => {
-    try {
-      const response = await authAPI.login(credentials);
-      localStorage.setItem('token', response.access_token);
-      
-      // Decode token to get user info
-      const payload = JSON.parse(atob(response.access_token.split('.')[1]));
-      setUser({ username: payload.sub });
-    } catch (error) {
-      throw error;
-    }
+    const response = await authAPI.login(credentials);
+    localStorage.setItem('token', response.access_token);
+
+    // Decode token to get user info
+    const payload = JSON.parse(atob(response.access_token.split('.')[1]));
+    setUser({ username: payload.sub });
   };
 
   const logout = () => {
