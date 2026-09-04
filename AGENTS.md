@@ -1,177 +1,120 @@
-# Agent instructions
+# Letterboxarr agent guide
 
-This file provides guidance to coding agents working in this repository.
-
-## What this is
-
-Letterboxarr scrapes Letterboxd lists and feeds the films on them to Radarr. It
-is one FastAPI process (`main.py`, port 7373) that serves both the JSON API and
-the built React SPA, with a background thread doing the crawling and syncing.
-Deployed as a single Docker image.
+Letterboxarr is a FastAPI service that scrapes Letterboxd lists and sends their
+films to Radarr. `main.py` serves the API and built React SPA on port 7373 while
+a background thread crawls and syncs. The application ships as one Docker image.
 
 ## Commands
 
 ```bash
-# Run the server (serves API + frontend/build at http://localhost:7373)
+# Run the API and built frontend at http://localhost:7373
 python main.py
 
-# Frontend: build, then let the backend serve it
+# Install and build the frontend
 cd frontend && npm install && npm run build
 
-# Frontend typecheck — the only static check in the repo
+# Type-check the frontend
 cd frontend && npx tsc --noEmit
 
-# Docker
+# Build the image
 docker build -t letterboxarr .
 ```
 
-**There is no test suite** — no pytest, no `*.test.tsx`, and `react-scripts
-test` has nothing to run. Verify changes by exercising the real thing: run the
-server, or import the module and call the function against real scraped data.
-When you touch a pure function, a throwaway script comparing its output across
-cases is the expected level of rigour.
+There is no test suite. Verify changes against the running application, or use a
+small throwaway script for a pure function. `npm start` serves the frontend on
+port 3000, but API requests will fail because axios uses `/api` and
+`frontend/package.json` has no proxy. Build the frontend and serve it through
+the backend instead.
 
-`cd frontend && npm start` will serve the UI on :3000 but **its API calls will
-404** — `package.json` has no `proxy` field and axios uses a relative
-`baseURL: '/api'`. Build and let the backend serve it.
+### Import safety
 
-## Importing the backend has side effects
+Importing `lib_api` constructs the global `LetterboxarrAPIContext`. When
+`config.yml` exists, that import opens and migrates `data/letterboxarr.db` and
+starts the live Letterboxd/Radarr sync thread. Do not import it while pointing at
+data or services you are unwilling to modify.
 
-`lib_api.py` constructs its `LetterboxarrAPIContext` singleton **at module
-import time** (`context = LetterboxarrAPIContext()` at the bottom of the class
-definitions). Importing `lib_api` for any reason — including to unit-test one
-pure function — loads `config.yml`, opens/migrates `./data/letterboxarr.db`,
-and starts the background sync thread against the live Letterboxd and Radarr.
+## Architecture and invariants
 
-For a quick check of a pure helper, this is usually tolerable (the thread dies
-with the process), but know that it happens and never do it against data you
-care about.
-
-## Architecture
-
-Data flows in one direction, and every read the UI does stops at SQLite:
-
-```
-config.yml ──> lib_config     watch items (Letterboxd paths + per-list filters/tags)
-                   │
-                   v
-              lib_letterboxd  scraper: curl_cffi impersonation + BeautifulSoup
-                   │
-                   v
-              lib_db          SQLite — the source of truth, not a cache
-                   │
-        ┌──────────┴──────────┐
-        v                     v
-   lib_radarr            lib_api          FastAPI routes, JWT auth, serves the SPA
-   (adds movies)         (reads stored data only)
+```text
+config.yml -> lib_config -> lib_sync
+                              |-> lib_refresh -> lib_letterboxd -> SQLite
+                              `-> lib_radarr
+SQLite -> lib_api -> React SPA
 ```
 
-`lib_sync.LetterboxarrSync.sync_once()` is the round, driven on the configured
-interval by `LetterboxarrThread`: refresh the listings, hand new films to
-Radarr, then read release tables, then read ratings. `lib_refresh.ListRefresher`
-owns all the "keep the stored data fresh" logic.
+- `lib_sync.LetterboxarrSync.sync_once()` runs a round: refresh listings, send
+  new films to Radarr, read release tables, then read ratings.
+- `lib_refresh.ListRefresher` owns stored-data freshness. API routes read SQLite
+  and must never crawl Letterboxd.
+- SQLite is the application's source of truth, not a disposable cache. Replace a
+  listing only after its complete replacement has been read.
+- A partial or refused crawl must raise. Returning partial results can overwrite
+  a complete list and make downstream code treat missing films as removals.
 
-### The database is the application's data, not a cache
+### Crawl limits
 
-This is the single most important idea in the codebase and it is why
-`lib_db.py` has no expiry anywhere. API reads answer from SQLite; the
-background refresher replaces a stored listing **only once its replacement has
-been read in full**. A crawl that is slow, refused or rate-limited therefore
-degrades into serving yesterday's list rather than serving nothing or, worse,
-serving a half-read list as if films had left it.
+All Letterboxd requests share `crawl_lock`; never make crawls concurrent. Paging
+loops pause between requests. Release tables and ratings cost one page per film,
+so `lib_refresh.py` budgets them separately:
 
-Consequences worth internalising before changing scraper or refresher code:
+| Data | Maximum age | Reads per round |
+| --- | ---: | ---: |
+| Release tables | 12 hours | 100 |
+| Ratings | 30 days | 500 |
 
-- A partial crawl must raise, not return what it got. Returning a short list
-  silently overwrites a complete one, which reads downstream as films having
-  been removed — and auto-add reacts to that.
-- Endpoints never crawl. Opening a page must not wait on Letterboxd. If you
-  need data the UI doesn't have, the fix goes in `ListRefresher`, not the route.
+Increasing these values directly lengthens sync rounds. Unread work is logged
+and carried into later rounds.
 
-### Crawl budgets
+### Scraper constraints
 
-Letterboxd rate-limits and bot-blocks, so every request goes through a single
-`crawl_lock` — no two crawls ever run concurrently — and the paging loops sleep
-a second between pages. Listings are a page per hundred films;
-release tables and ratings are a page *per film*, so they are budgeted
-separately in `lib_refresh.py`:
-
-| | max age | reads per round |
-|---|---|---|
-| Release tables | 12 h | 100 |
-| Ratings | 30 d | 500 |
-
-Anything left over is logged and picked up by later rounds. Raising these has a
-direct wall-clock cost on every sync round — the constants carry the reasoning
-in their comments.
-
-### Scraper specifics (`lib_letterboxd.py`)
-
-- **`curl_cffi`, not `requests`**, for browser TLS impersonation. Fingerprints
-  are tried in order because Letterboxd refuses some of them on member pages
-  (a 403 on page 2 while page 1 answers fine).
-- **Categories overlap** (`film`, `short_film`, `documentary`, `tv_show`,
-  `unreleased`) so `CATEGORY_SKIP_FILTERS` is ordered and first match wins,
-  with `unreleased` first.
-- **Dates are parsed against a `MONTHS` table, not `strptime`** — `%b` follows
-  the process locale, and a base image that set one would silently stop reading
-  every date on the page.
-- **Watch items accept a path or a whole URL.** A privately shared list is only
-  reachable through its secret `boxd.it` link; its ordinary
-  `/<member>/list/<slug>/` URL 404s for everyone but the owner.
-- Posters must be read from the main column, not the whole document — a cloned
-  list shows its source's posters in the sidebar on every page.
+- Use `curl_cffi`'s requests-compatible client, not Requests, for Letterboxd.
+  Browser fingerprints are tried in order because some are refused on later
+  member-list pages.
+- `CATEGORY_SKIP_FILTERS` is ordered because categories overlap. Keep
+  `unreleased` first.
+- Parse release dates with `MONTHS`, not `strptime`; `%b` depends on locale.
+- Watch items accept paths or full URLs. Preserve full `boxd.it` URLs because a
+  privately shared list may 404 at its ordinary `/<member>/list/<slug>/` URL.
+- Read posters from the main column. Cloned lists repeat their source's posters
+  in the sidebar.
 
 ## Configuration
 
-`config.yml` (gitignored; see `examples/config.example.yml`) is the only live
-configuration path — edited through the UI as well as by hand. Two traps:
+`config.yml` is the live application configuration and is edited both by hand
+and through the UI. See `examples/config.example.yml`.
 
-- **`.env` in the repo root is not read by the application.** Nothing imports
-  `python-dotenv`, and `lib_config.load_config_from_env()` — which reads
-  `RADARR_*`, `LETTERBOXD_USERNAME`, `SYNC_INTERVAL_MINUTES` — **has no call
-  sites and is dead legacy code**. Those variables are for docker-compose and
-  shell use only. Changing them changes nothing about a running app.
-- The env vars that *are* live are read by `lib_api.py` at import:
-  `SECRET_KEY`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`. All three have insecure
-  defaults.
-
-`letterboxd.country` matters more than it looks: it is spelled the way
-Letterboxd spells it in a film's releases table (`USA`, `UK`, `France`,
-`Czechia`), and it drives the whole Upcoming tab.
+- A repository `.env` file is not loaded by the application.
+  `lib_config.load_config_from_env()` has no call sites and is legacy code.
+- `SECRET_KEY`, `ADMIN_USERNAME`, and `ADMIN_PASSWORD` are read from the
+  environment when `lib_api` is imported. Their defaults are insecure.
+- `letterboxd.country` must use Letterboxd's spelling from its release tables,
+  such as `USA`, `UK`, `France`, or `Czechia`; it drives the Upcoming page.
 
 ## Code style
 
-The prose in this codebase is load-bearing and quite specific — match it rather
-than defaulting to house style.
-
-- **Comments and docstrings say *why*, in full sentences**, and name the
-  concrete failure they prevent ("a 403 on page two of a 264-film list cut it
-  to a hundred"). They do not restate what the code does. A rule with a
-  non-obvious edge gets a paragraph explaining the edge, not a bullet list.
-- **Docstring first line is a phrase, not a sentence** — "The release a film is
-  dated by, None when it has none still to come".
-- Real examples over abstractions: an actual film, an actual count.
-- No emoji in code or comments. Frontend copy is sentence case and explains
-  itself to the user (see the empty states in `UpcomingPage.tsx`, which
-  distinguish four reasons a page can be empty).
+- Comments and docstrings explain why, in full sentences, and name the concrete
+  failure an unusual rule prevents. Do not restate the code.
+- Start docstrings with a phrase rather than a sentence, matching the existing
+  code.
+- Prefer real examples and counts over abstractions.
+- Do not use emoji in code or comments.
+- Keep frontend copy in sentence case and make empty states explain why no data
+  is shown.
 
 ## Merges
 
 Use the `merge` skill when asked to commit, push, create a PR and merge without
 cutting a release. It switches to a conventional branch, writes a Why/What PR,
-requires its build to pass and squash-merges it to `main`. Claude exposes the
+requires its build to pass, and squash-merges it to `main`. Claude exposes the
 same workflow as `/merge`; `.agents/skills/merge/SKILL.md` remains the single
 source of truth.
 
 ## Releases
 
-Use the `release` skill with a `patch`, `minor` or `major` bump. It switches to
-a conventional branch, commits and pushes it, opens and squash-merges a PR,
-then tags the merge and watches the builds. See
-`.agents/skills/release/SKILL.md` for the conventions and known credential
-failures.
+Use the `release` skill with a `patch`, `minor`, or `major` bump. It switches to
+a conventional branch, commits the work, opens and squash-merges a PR, tags the
+merge, and watches the builds. Its full procedure and credential-failure
+guidance live in `.agents/skills/release/SKILL.md`.
 
-Pushing a `v*.*.*` tag publishes to Docker Hub and cuts a GitHub Release; a
-push to `main` moves `latest`. **Both** runs must pass — the Docker Hub login
-is step 5 of 8, so a lapsed credential leaves a tag with no image behind it.
+A `v*.*.*` tag publishes the versioned Docker image and GitHub Release; a push
+to `main` publishes `latest`. Both workflows must pass.
