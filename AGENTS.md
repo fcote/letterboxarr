@@ -156,10 +156,19 @@ than defaulting to house style.
   itself to the user (see the empty states in `UpcomingPage.tsx`, which
   distinguish four reasons a page can be empty).
 
+## Merges
+
+Use the `merge` skill when asked to commit, push, create a PR and merge without
+cutting a release. It switches to a conventional branch, writes a Why/What PR,
+requires its build to pass and squash-merges it to `main`. Claude exposes the
+same workflow as `/merge`; `.agents/skills/merge/SKILL.md` remains the single
+source of truth.
+
 ## Releases
 
-Use the `release` skill with a `patch`, `minor` or `major` bump. It runs commit
-→ push → annotated tag and watches the builds. See
+Use the `release` skill with a `patch`, `minor` or `major` bump. It switches to
+a conventional branch, commits and pushes it, opens and squash-merges a PR,
+then tags the merge and watches the builds. See
 `.agents/skills/release/SKILL.md` for the conventions and known credential
 failures.
 
