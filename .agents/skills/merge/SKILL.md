@@ -111,14 +111,15 @@ update the existing PR when necessary. Never open a duplicate.
 
 ## 5. Prove and merge the PR
 
-Record the PR head, base and potential merge OIDs. Find and watch the
-pull-request workflow for that potential merge commit, then read all three OIDs
-again. If any changed while CI ran, repeat against the new candidate. Require a
-stable, passing set:
+Record the PR head, base and potential merge OIDs. Find the pull-request
+workflow by its branch and head OID, which is how GitHub indexes this
+repository's pull-request runs, then watch that exact run. Read all three OIDs
+again afterward. If any changed while CI ran, repeat against the new candidate.
+Require a stable, passing set:
 
 ```bash
 gh pr view <number> --json headRefOid,baseRefOid,potentialMergeCommit
-gh run list --workflow publish.yml --event pull_request --commit <potential-merge-oid> --json databaseId,headSha,status,conclusion,url
+gh run list --workflow publish.yml --event pull_request --branch <type>/<name> --commit <checked-head-oid> --json databaseId,headSha,status,conclusion,url
 gh run watch <pr-run-id> --exit-status
 gh pr view <number> --json headRefOid,baseRefOid,potentialMergeCommit
 ```
