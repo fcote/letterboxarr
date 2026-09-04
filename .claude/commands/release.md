@@ -1,5 +1,5 @@
 ---
-description: Commit, push and tag a release — patch, minor or major
+description: Branch, PR, merge and tag a release — patch, minor or major
 argument-hint: patch | minor | major
 ---
 
