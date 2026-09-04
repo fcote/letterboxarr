@@ -143,7 +143,7 @@ const WatchItemsPage: React.FC = () => {
         const { [id]: _removed, ...rest } = previous;
         return rest;
       });
-    } catch (error: any) {
+    } catch {
       setRowState(previous => ({ ...previous, [id]: 'error' }));
     }
   }, []);
@@ -166,7 +166,7 @@ const WatchItemsPage: React.FC = () => {
       setTagOptions(page.tag_options);
       setRowState({});
       setLoadedKey(queryKey);
-    } catch (error: any) {
+    } catch {
       if (run !== pageRun.current) return;
       toast.error('Failed to load watch items');
     } finally {
@@ -188,7 +188,7 @@ const WatchItemsPage: React.FC = () => {
       setWatchItems(previous => [...previous, ...page.items]);
       setMatched(page.matched);
       setTotal(page.total);
-    } catch (error: any) {
+    } catch {
       if (run !== pageRun.current) return;
       toast.error('Failed to load more watch items');
     } finally {
@@ -353,8 +353,8 @@ const WatchItemsPage: React.FC = () => {
     // thing, because four numbers in one bubble read as four inputs to the last
     // of them: neither figure below is worked out from how many ratings a film
     // has drawn, and an unrated film is left out rather than counted as a zero.
-    const total = progressOf(item)?.total;
-    const unrated = total === undefined ? 0 : total - ratings.rated;
+    const filmTotal = progressOf(item)?.total;
+    const unrated = filmTotal === undefined ? 0 : filmTotal - ratings.rated;
 
     const lines = [
       `${ratings.rating.toFixed(2)} average on Letterboxd`,

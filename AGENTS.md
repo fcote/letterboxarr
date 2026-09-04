@@ -16,6 +16,13 @@ cd frontend && npm install && npm run build
 # Type-check the frontend
 cd frontend && npx tsc --noEmit
 
+# Lint the frontend
+cd frontend && npm run lint
+
+# Install and run the backend linters
+python -m pip install -r requirements-lint.txt
+ruff check . && bandit -c pyproject.toml -r .
+
 # Build the image
 docker build -t letterboxarr .
 ```
@@ -25,6 +32,22 @@ small throwaway script for a pure function. `npm start` serves the frontend on
 port 3000, but API requests will fail because axios uses `/api` and
 `frontend/package.json` has no proxy. Build the frontend and serve it through
 the backend instead.
+
+### Required lint checks
+
+Pull request CI enforces the same checks listed above. Before handing off any
+change, run every lint suite whose files could be affected:
+
+- For frontend changes, run `cd frontend && npm run lint`.
+- For backend or repository-level Python changes, run `ruff check .` and
+  `bandit -c pyproject.toml -r .` from the repository root.
+- For changes spanning both areas, run all three commands.
+
+Treat `frontend/.oxlintrc.json` and the Ruff and Bandit sections of
+`pyproject.toml` as the source of truth. Fix violations in the code. Do not
+weaken a rule or add an inline suppression merely to make CI pass; suppress a
+finding only when it is a genuine false positive, keep the suppression as
+narrow as possible, and explain why it is safe in a full-sentence comment.
 
 ### Import safety
 

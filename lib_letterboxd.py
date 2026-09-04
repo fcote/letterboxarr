@@ -1,16 +1,20 @@
+import hashlib
+import json
 import re
 import time
-import json
-import hashlib
 from datetime import date
 from threading import RLock
 from typing import Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
 from urllib.parse import urlsplit, urlunsplit
 
-from curl_cffi import requests
 from bs4 import BeautifulSoup
+from curl_cffi import requests
 
-from lib_config import WatchListItem, create_letterboxd_cookie_filters, LetterboxdFilters
+from lib_config import (
+    LetterboxdFilters,
+    WatchListItem,
+    create_letterboxd_cookie_filters,
+)
 from lib_db import Database
 
 # Categories a Letterboxd entry can be sorted into
@@ -117,7 +121,8 @@ class LetterboxdScraper:
             key_data['sort'] = sort
 
         key_string = json.dumps(key_data, sort_keys=True)
-        return hashlib.md5(key_string.encode()).hexdigest()
+        # This is a cache key, not a cryptographic digest.
+        return hashlib.md5(key_string.encode(), usedforsecurity=False).hexdigest()
 
     def get_movies_from_watch_lists(self, watch_items: List[WatchListItem], global_filters: LetterboxdFilters) -> List[Dict]:
         """Fetch and parse movies from multiple watch lists"""

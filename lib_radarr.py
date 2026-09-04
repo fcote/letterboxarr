@@ -1,4 +1,4 @@
-from typing import Optional, Dict, List
+from typing import Dict, List, Optional
 
 import requests
 
@@ -57,9 +57,9 @@ class RadarrAPI:
             matches = []
             for movie in results:
                 # Exact title and year match
-                if year and movie.get('year') == year:
-                    if movie.get('title', '').lower() == title.lower():
-                        matches.append(movie)
+                if (year and movie.get('year') == year
+                        and movie.get('title', '').lower() == title.lower()):
+                    matches.append(movie)
 
             if len(matches) == 1:
                 return matches[0]

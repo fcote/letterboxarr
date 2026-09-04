@@ -19,6 +19,7 @@ import json
 import os
 import sqlite3
 import time
+from contextlib import suppress
 from glob import glob
 from threading import RLock
 from typing import Dict, List, Optional, Sequence, Set, Tuple
@@ -326,7 +327,9 @@ class Database:
             placeholders = ','.join('?' * len(paths))
             with self.lock, self.connection:
                 cursor = self.connection.execute(
-                    f"DELETE FROM lists WHERE path NOT IN ({placeholders})", tuple(paths)
+                    # Only question-mark placeholders are interpolated; all path values stay bound.
+                    f"DELETE FROM lists WHERE path NOT IN ({placeholders})",  # nosec B608
+                    tuple(paths),
                 )
             return cursor.rowcount
         except sqlite3.Error as e:
@@ -853,11 +856,9 @@ class Database:
             except OSError as e:
                 self.logger.warning(f"Could not remove stale cache file {cache_file}: {e}")
 
-        try:
+        # Leave the directory alone when an unrelated file is still inside it.
+        with suppress(OSError):
             os.rmdir(LEGACY_CACHE_DIR)
-        except OSError:
-            # Something else is in there, leave it alone
-            pass
 
         if cache_files:
             self.logger.info(f"Removed {len(cache_files)} cache files superseded by {self.db_path}")

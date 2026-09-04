@@ -24,4 +24,5 @@ if __name__ == "__main__":
         logger.info(f"    {i+1}. {watch_item.path} (tags: {watch_item.tags})")
 
     # Run the server
-    uvicorn.run(context.app, host="0.0.0.0", port=7373)
+    # The container must accept connections forwarded to its published port.
+    uvicorn.run(context.app, host="0.0.0.0", port=7373)  # nosec B104

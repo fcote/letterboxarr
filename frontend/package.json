@@ -3,21 +3,22 @@
   "version": "1.0.0",
   "private": true,
   "dependencies": {
+    "@headlessui/react": "^1.7.13",
+    "@heroicons/react": "^2.0.16",
+    "axios": "^1.3.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-hook-form": "^7.43.5",
+    "react-hot-toast": "^2.4.0",
+    "react-query": "^3.39.3",
     "react-router-dom": "^6.8.1",
     "react-scripts": "5.0.1",
-    "axios": "^1.3.4",
-    "react-hook-form": "^7.43.5",
-    "react-query": "^3.39.3",
-    "react-hot-toast": "^2.4.0",
-    "tailwindcss": "^3.2.7",
-    "@headlessui/react": "^1.7.13",
-    "@heroicons/react": "^2.0.16"
+    "tailwindcss": "^3.2.7"
   },
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
+    "lint": "oxlint --deny-warnings src",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },
@@ -40,11 +41,12 @@
     ]
   },
   "devDependencies": {
-    "autoprefixer": "^10.4.13",
-    "postcss": "^8.4.21",
-    "typescript": "^4.9.5",
+    "@types/node": "^18.15.0",
     "@types/react": "^18.0.28",
     "@types/react-dom": "^18.0.11",
-    "@types/node": "^18.15.0"
+    "autoprefixer": "^10.4.13",
+    "oxlint": "1.81.0",
+    "postcss": "^8.4.21",
+    "typescript": "^4.9.5"
   }
 }

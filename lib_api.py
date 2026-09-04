@@ -6,27 +6,26 @@ import re
 import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import List, Dict, NamedTuple, Optional
+from typing import Dict, List, NamedTuple, Optional
 
 import yaml
-from fastapi import FastAPI, HTTPException, Depends, Query, status, BackgroundTasks
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel
 
-from lib_config import ConfigLoader, Config, WatchListItem, LetterboxdFilters
+from lib_config import Config, ConfigLoader, LetterboxdFilters, WatchListItem
 from lib_letterboxd import (
-    LetterboxdScraper,
-    ListingUnavailable,
+    CATEGORY_DOCUMENTARY,
     CATEGORY_FILM,
     CATEGORY_SHORT_FILM,
-    CATEGORY_DOCUMENTARY,
     CATEGORY_TV_SHOW,
     CATEGORY_UNRELEASED,
+    ListingUnavailable,
 )
 from lib_sync import LetterboxarrSync, LetterboxarrThread, movie_key
 
@@ -145,8 +144,8 @@ class LetterboxarrAPIContext:
             username: str = payload.get("sub")
             if username is None:
                 raise credentials_exception
-        except JWTError:
-            raise credentials_exception
+        except JWTError as e:
+            raise credentials_exception from e
 
         if username != DEFAULT_USERNAME:
             raise credentials_exception
@@ -189,7 +188,8 @@ async def login(login_request: LoginRequest):
         data={"sub": user["username"]},
         expires_delta=access_token_expires
     )
-    return {"access_token": access_token, "token_type": "bearer"}
+    # "bearer" names the OAuth token type; it is not a hard-coded credential.
+    return {"access_token": access_token, "token_type": "bearer"}  # nosec B105
 
 @context.app.get("/api/config")
 async def get_config(current_user: dict = Depends(context.get_current_user)):
@@ -216,7 +216,7 @@ async def update_config(config_update: Config, current_user: dict = Depends(cont
 
     except Exception as e:
         logger.error(f"Error updating configuration: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to update configuration: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to update configuration: {str(e)}") from e
 
 # How many watch items one page of the watch items tab holds. The page appends
 # as it scrolls, so this is how much arrives at a time rather than a limit on
@@ -439,7 +439,7 @@ def get_watch_items(
 
     except Exception as e:
         logger.error(f"Error getting the watch items: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get watch items: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get watch items: {str(e)}") from e
 
 @context.app.post("/api/watch-items")
 async def create_watch_item(item: WatchItemCreate, current_user: dict = Depends(context.get_current_user)):
@@ -469,7 +469,7 @@ async def create_watch_item(item: WatchItemCreate, current_user: dict = Depends(
 
     except Exception as e:
         logger.error(f"Error creating watch item: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to create watch item: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to create watch item: {str(e)}") from e
 
 @context.app.put("/api/watch-items/{item_id}")
 async def update_watch_item(item_id: int, item: WatchItemUpdate, current_user: dict = Depends(context.get_current_user)):
@@ -501,7 +501,7 @@ async def update_watch_item(item_id: int, item: WatchItemUpdate, current_user: d
 
     except Exception as e:
         logger.error(f"Error updating watch item: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to update watch item: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to update watch item: {str(e)}") from e
 
 @context.app.delete("/api/watch-items/{item_id}")
 async def delete_watch_item(item_id: int, current_user: dict = Depends(context.get_current_user)):
@@ -523,7 +523,7 @@ async def delete_watch_item(item_id: int, current_user: dict = Depends(context.g
 
     except Exception as e:
         logger.error(f"Error deleting watch item: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to delete watch item: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete watch item: {str(e)}") from e
 
 @context.app.get("/api/radarr/quality-profiles")
 def get_radarr_quality_profiles(current_user: dict = Depends(context.get_current_user)):
@@ -538,7 +538,7 @@ def get_radarr_quality_profiles(current_user: dict = Depends(context.get_current
         profiles = context.sync_instance.radarr.get_quality_profiles()
     except Exception as e:
         logger.error(f"Error fetching quality profiles from Radarr: {e}")
-        raise HTTPException(status_code=502, detail=f"Could not reach Radarr: {e}")
+        raise HTTPException(status_code=502, detail=f"Could not reach Radarr: {e}") from e
 
     return {
         "profiles": [
@@ -589,7 +589,7 @@ async def get_processed_movies(current_user: dict = Depends(context.get_current_
         return {"movies": processed_movies, "count": len(processed_movies)}
     except Exception as e:
         logger.error(f"Error getting processed movies: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get processed movies: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get processed movies: {str(e)}") from e
 
 def get_categorised_movies(item_id: int) -> List[Dict]:
     """Movies of a watch item, each with its category, Radarr status and rating
@@ -814,7 +814,7 @@ def get_movies_by_watch_item(item_id: int, current_user: dict = Depends(context.
         movies = get_categorised_movies(item_id)
         watched_slugs = get_watched_slugs()
 
-        category_counts = {category: 0 for category in MOVIE_CATEGORIES}
+        category_counts = dict.fromkeys(MOVIE_CATEGORIES, 0)
         for movie in movies:
             category_counts[movie["category"]] = category_counts.get(movie["category"], 0) + 1
             movie["watched"] = None if watched_slugs is None else movie["letterboxd_slug"] in watched_slugs
@@ -840,10 +840,10 @@ def get_movies_by_watch_item(item_id: int, current_user: dict = Depends(context.
         # Nothing has ever been read for this path and Letterboxd will not give
         # it up now: say why instead of showing the list as empty
         logger.warning(f"Could not read the listing of watch item {item_id}: {e}")
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Error getting movies for watch item: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get movies: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get movies: {str(e)}") from e
 
 @context.app.post("/api/watch-items/{item_id}/refresh")
 def refresh_watch_item(item_id: int, current_user: dict = Depends(context.get_current_user)):
@@ -868,10 +868,10 @@ def refresh_watch_item(item_id: int, current_user: dict = Depends(context.get_cu
 
     except ListingUnavailable as e:
         logger.warning(f"Could not re-read watch item {item_id}: {e}")
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Error refreshing watch item: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to refresh watch item: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to refresh watch item: {str(e)}") from e
 
 # Progress is reported from the stored listings alone, so this never crawls: a
 # request that stopped to read a list from Letterboxd would hold up the row
@@ -895,7 +895,7 @@ def get_watch_item_progress(item_id: int, current_user: dict = Depends(context.g
 
     except Exception as e:
         logger.error(f"Error getting progress for watch item: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get progress: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get progress: {str(e)}") from e
 
 # Release types the page has no use for, whatever country they are in. A
 # premiere is a festival screening or a red carpet nobody can buy a ticket to,
@@ -1062,7 +1062,7 @@ def get_upcoming(current_user: dict = Depends(context.get_current_user)):
 
     except Exception as e:
         logger.error(f"Error getting the upcoming releases: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get upcoming releases: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get upcoming releases: {str(e)}") from e
 
 
 @context.app.post("/api/upcoming/refresh")
@@ -1082,7 +1082,7 @@ def refresh_upcoming(current_user: dict = Depends(context.get_current_user)):
 
     except Exception as e:
         logger.error(f"Error refreshing the release dates: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to refresh release dates: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to refresh release dates: {str(e)}") from e
 
 
 @context.app.post("/api/sync/run")
@@ -1237,7 +1237,7 @@ def add_movie_to_radarr(request: MovieAddRequest, current_user: dict = Depends(c
 
     except Exception as e:
         logger.error(f"Error adding movie to Radarr: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to add movie: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to add movie: {str(e)}") from e
 
 @context.app.get("/api/status")
 async def get_status():

@@ -129,15 +129,19 @@ list may take several rounds to fill in.
 
 ## Local development
 
-Local development requires Python 3.9+ and Node.js 18+.
+Local development requires Python 3.9+ and Node.js 22+.
 
 ```bash
 cd frontend
 npm install
+npm run lint
 npm run build
 cd ..
 
 python -m pip install -r requirements.txt
+python -m pip install -r requirements-lint.txt
+ruff check .
+bandit -c pyproject.toml -r .
 python main.py
 ```
 
