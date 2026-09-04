@@ -20,18 +20,32 @@ code {
 
 @layer components {
   .btn-primary {
-    @apply bg-transparent text-brand-green border border-brand-green font-medium px-4 py-2 rounded-md hover:opacity-70 transition-all duration-200;
+    @apply bg-brand-green text-dark-bg-primary border border-brand-green font-semibold px-4 py-2 rounded-md hover:opacity-80 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
   }
   
   .btn-secondary {
-    @apply bg-dark-bg-tertiary text-dark-text-primary border border-dark-border hover:bg-dark-border transition-colors px-4 py-2 rounded-md;
+    @apply bg-dark-bg-secondary text-dark-text-secondary border border-dark-border/60 hover:bg-dark-bg-tertiary transition-colors px-4 py-2 rounded-md;
   }
   
   .card {
-    @apply bg-dark-bg-secondary border border-dark-border rounded-lg shadow-lg;
+    @apply bg-dark-bg-secondary border border-dark-border/50 rounded-lg;
   }
   
   .input-field {
     @apply bg-dark-bg-tertiary border border-dark-border text-dark-text-primary placeholder-dark-text-muted focus:border-brand-blue focus:ring-1 focus:ring-brand-blue rounded-md px-3 py-2;
+  }
+}
+
+@layer base {
+  :where(a, button, input, select, textarea, summary):focus-visible {
+    @apply outline outline-2 outline-offset-4 outline-brand-blue;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }

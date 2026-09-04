@@ -67,9 +67,9 @@ const ConfigPage: React.FC = () => {
 
   return (
     <Layout>
-      <div className="px-4 py-6 sm:px-0">
+      <div className="py-6 lg:py-8">
         <div className="border-b border-dark-border pb-5">
-          <h1 className="text-2xl font-bold leading-6 text-dark-text-primary">Configuration</h1>
+          <h1 className="text-2xl font-bold leading-6 text-dark-text-primary">Settings</h1>
           <p className="mt-2 max-w-4xl text-sm text-dark-text-muted">
             Configure your Radarr connection, sync settings, and Letterboxd filters.
           </p>
@@ -94,7 +94,7 @@ const ConfigPage: React.FC = () => {
                     <input
                       type="number"
                       {...register('sync.interval_minutes', { required: true, min: 1, valueAsNumber: true })}
-                      className="input-field"
+                      className="input-field w-full min-w-0"
                       placeholder="60"
                     />
                     <p className="mt-2 text-sm text-dark-text-muted">
@@ -129,7 +129,7 @@ const ConfigPage: React.FC = () => {
                     <input
                       type="url"
                       {...register('radarr.url', { required: true })}
-                      className="input-field"
+                      className="input-field w-full min-w-0"
                       placeholder="https://radarr.example.com"
                     />
                     {errors.radarr?.url && (
@@ -144,7 +144,7 @@ const ConfigPage: React.FC = () => {
                     <input
                       type="password"
                       {...register('radarr.api_key', { required: true })}
-                      className="input-field"
+                      className="input-field w-full min-w-0"
                       placeholder="Enter your Radarr API key"
                     />
                     {errors.radarr?.api_key && (
@@ -152,7 +152,7 @@ const ConfigPage: React.FC = () => {
                     )}
                   </div>
 
-                  <div className="col-span-3">
+                  <div className="col-span-6 sm:col-span-3">
                     <label htmlFor="radarr.quality_profile" className="block text-sm font-medium text-dark-text-secondary">
                       Quality Profile
                     </label>
@@ -161,7 +161,7 @@ const ConfigPage: React.FC = () => {
                         <input
                           type="number"
                           {...register('radarr.quality_profile', { required: true, min: 1, valueAsNumber: true })}
-                          className="input-field"
+                          className="input-field w-full min-w-0"
                           placeholder="1"
                         />
                         <p className="mt-2 text-sm text-dark-text-muted">
@@ -170,14 +170,14 @@ const ConfigPage: React.FC = () => {
                         </p>
                       </>
                     ) : profiles === null ? (
-                      <div className="input-field flex items-center text-dark-text-muted">
+                      <div className="input-field flex min-w-0 items-center text-dark-text-muted">
                         <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-dark-text-muted mr-2"></div>
                         Loading profiles from Radarr...
                       </div>
                     ) : (
                       <select
                         {...register('radarr.quality_profile', { required: true, valueAsNumber: true })}
-                        className="input-field"
+                        className="input-field w-full min-w-0"
                       >
                         {/* A profile deleted in Radarr would otherwise silently
                             become whichever one happens to be listed first */}
@@ -198,14 +198,14 @@ const ConfigPage: React.FC = () => {
                     )}
                   </div>
 
-                  <div className="col-span-3">
+                  <div className="col-span-6 sm:col-span-3">
                     <label htmlFor="radarr.root_folder" className="block text-sm font-medium text-dark-text-secondary">
                       Root Folder Path
                     </label>
                     <input
                       type="text"
                       {...register('radarr.root_folder', { required: true })}
-                      className="input-field"
+                      className="input-field w-full min-w-0"
                       placeholder="/media/movies"
                     />
                     {errors.radarr?.root_folder && (
@@ -214,7 +214,7 @@ const ConfigPage: React.FC = () => {
                   </div>
 
                   <div className="col-span-6">
-                    <div className="flex items-center space-x-6">
+                    <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
                       <div className="flex items-center">
                         <input
                           id="monitor_added"
@@ -266,7 +266,7 @@ const ConfigPage: React.FC = () => {
                       <input
                         type="text"
                         {...register('letterboxd.username')}
-                        className="input-field rounded-none rounded-r-md w-full"
+                        className="input-field min-w-0 rounded-none rounded-r-md w-full"
                         placeholder="your-username"
                       />
                     </div>
@@ -294,7 +294,7 @@ const ConfigPage: React.FC = () => {
                     <label htmlFor="letterboxd.country" className="block text-sm font-medium text-dark-text-secondary">
                       Country (optional)
                     </label>
-                    <select {...register('letterboxd.country')} className="input-field">
+                    <select {...register('letterboxd.country')} className="input-field w-full min-w-0">
                       <option value="">No preference — earliest date anywhere</option>
                       {/* A country set by hand in config.yml that Letterboxd has
                           never been seen to name would otherwise be replaced by
@@ -382,7 +382,7 @@ const ConfigPage: React.FC = () => {
               disabled={saving}
               className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {saving ? 'Saving...' : 'Save Configuration'}
+              {saving ? 'Saving...' : 'Save settings'}
             </button>
           </div>
         </form>
