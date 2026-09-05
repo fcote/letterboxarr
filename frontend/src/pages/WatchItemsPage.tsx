@@ -328,7 +328,7 @@ const WatchItemsPage: React.FC = () => {
     }
 
     return (
-      <span className="flex items-center gap-2">
+      <span className="flex min-w-0 flex-wrap items-center gap-2">
         <CategoryRings categories={categories} />
         <span className="text-dark-text-muted whitespace-nowrap">
           {state.watched}/{state.total} watched
@@ -558,7 +558,7 @@ const WatchItemsPage: React.FC = () => {
   return (
     <Layout>
       <div className="py-6 lg:py-8">
-        <div className="border-b border-dark-border pb-5 flex justify-between items-center">
+        <div className="border-b border-dark-border pb-5 flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
           <div>
             <h1 className="text-2xl font-bold leading-6 text-dark-text-primary">Watch lists</h1>
             <p className="mt-2 max-w-4xl text-sm text-dark-text-muted">
@@ -567,10 +567,10 @@ const WatchItemsPage: React.FC = () => {
           </div>
           <button
             onClick={() => setShowAddForm(true)}
-            className="btn-primary flex"
+            className="btn-primary flex shrink-0 items-center"
           >
             <PlusIcon className="w-4 mr-2" />
-            Add Watch Item
+            Add watch item
           </button>
         </div>
 
@@ -596,7 +596,7 @@ const WatchItemsPage: React.FC = () => {
                         value={newItem.path}
                         onChange={(e) => setNewItem({ ...newItem, path: e.target.value })}
                         disabled={submitting}
-                        className={`input-field w-full disabled:opacity-50 ${
+                        className={`input-field min-w-0 w-full disabled:opacity-50 ${
                           isLink(newItem.path) ? 'rounded-md' : 'rounded-none rounded-r-md'
                         }`}
                         placeholder="username/watchlist"
@@ -618,7 +618,7 @@ const WatchItemsPage: React.FC = () => {
                         value={tagInput}
                         onChange={(e) => setTagInput(e.target.value)}
                         onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddTags())}
-                        className="input-field rounded-l-md rounded-r-none w-full"
+                        className="input-field rounded-l-md rounded-r-none min-w-0 w-full"
                         placeholder="Add tags separated by commas"
                       />
                       <button
@@ -720,7 +720,7 @@ const WatchItemsPage: React.FC = () => {
                       {submitting && (
                         <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
                       )}
-                      {submitting ? 'Adding...' : 'Add Watch Item'}
+                      {submitting ? 'Adding...' : 'Add watch item'}
                     </button>
                   </div>
                 </form>
@@ -751,7 +751,7 @@ const WatchItemsPage: React.FC = () => {
                         value={editItem.path}
                         onChange={(e) => setEditItem({ ...editItem, path: e.target.value })}
                         disabled={editing}
-                        className={`input-field w-full disabled:opacity-50 ${
+                        className={`input-field min-w-0 w-full disabled:opacity-50 ${
                           isLink(editItem.path) ? 'rounded-md' : 'rounded-none rounded-r-md'
                         }`}
                         placeholder="username/watchlist"
@@ -773,7 +773,7 @@ const WatchItemsPage: React.FC = () => {
                         value={editTagInput}
                         onChange={(e) => setEditTagInput(e.target.value)}
                         onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddEditTags())}
-                        className="input-field rounded-l-md rounded-r-none w-full"
+                        className="input-field rounded-l-md rounded-r-none min-w-0 w-full"
                         placeholder="Add tags separated by commas"
                       />
                       <button
@@ -891,8 +891,8 @@ const WatchItemsPage: React.FC = () => {
             field it was typed into off the screen, and with it the only way of
             correcting the search that emptied the page. */}
         {total > 0 && (
-          <div className="sticky top-0 z-10 mt-6 flex flex-wrap items-center gap-2 bg-dark-bg-primary py-3">
-            <div className="relative min-w-64 max-w-sm flex-1">
+          <div className="relative z-10 mt-6 flex flex-wrap sm:sticky sm:top-0 items-center gap-2 bg-dark-bg-primary py-3">
+            <div className="relative w-full min-w-0 sm:max-w-sm sm:flex-1 sm:basis-64">
               <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-dark-text-muted" />
               <input
                 type="text"
@@ -950,12 +950,12 @@ const WatchItemsPage: React.FC = () => {
                 : `${matched} of ${total}`}
             </span>
 
-            <label className="ml-2 flex items-center gap-2 whitespace-nowrap text-xs text-dark-text-muted">
+            <label className="flex w-full min-w-0 items-center gap-2 whitespace-nowrap text-xs text-dark-text-muted sm:ml-2 sm:w-auto">
               Sort
               <select
                 value={sort}
                 onChange={(e) => setSort(e.target.value as SortKey)}
-                className="input-field h-9 py-0 text-sm"
+                className="input-field h-9 min-w-0 flex-1 py-0 text-sm sm:flex-none"
                 aria-label="Sort watch items"
               >
                 {SORTS.map(([key, label]) => (
@@ -1009,11 +1009,10 @@ const WatchItemsPage: React.FC = () => {
             <div className="card overflow-hidden">
               <ul className="divide-y divide-dark-border">
                 {watchItems.map((item) => (
-                  <li key={item.id} className="px-4 py-2">
-                    {/* One line per list: the path takes what room is left, and
-                        everything that is not needed at a glance is on the hover
-                        summary rather than on a line of its own */}
-                    <div className="flex items-center gap-4">
+                  <li key={item.id} className="px-4 py-4 xl:py-2">
+                    {/* Stack details below the path until there is room for the
+                        progress and actions without squeezing the list name. */}
+                    <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:gap-4">
                       <div className="flex min-w-0 flex-1 items-center gap-2">
                         {/* The summary hangs off this one icon rather than the whole
                             row, so passing over a path does not raise a bubble.
@@ -1026,26 +1025,26 @@ const WatchItemsPage: React.FC = () => {
                         >
                           <InformationCircleIcon className="h-4 w-4" />
                         </Tooltip>
-                        <p className="truncate text-sm font-medium text-dark-text-primary">
+                        <p className="min-w-0 break-words text-sm font-medium text-dark-text-primary xl:truncate">
                           {watchItemAddress(item)}
                         </p>
                       </div>
-                      <div className="flex flex-shrink-0 items-center gap-3 text-xs">
+                      <div className="flex min-w-0 flex-wrap items-center gap-3 text-xs xl:shrink-0">
                         {renderRating(item)}
                         {renderProgress(item)}
                       </div>
-                      <div className="flex flex-shrink-0 items-center space-x-2">
+                      <div className="flex flex-shrink-0 flex-wrap items-center gap-2">
                         <Link
                           to={`/movies/${item.id}`}
                           className="text-brand-blue hover:text-brand-blue/80 text-sm font-medium"
                         >
-                          View Movies
+                          View movies
                         </Link>
                         {/* No tooltips on these: aria-label still names each one
                             for anything not reading the picture */}
                         <button
                           onClick={() => handleEditClick(item)}
-                          className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-dark-text-muted hover:bg-dark-bg-tertiary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-blue"
+                          className="inline-flex items-center justify-center p-3 xl:p-1 border border-transparent rounded-full shadow-sm text-dark-text-muted hover:bg-dark-bg-tertiary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-blue"
                           aria-label={`Edit ${watchItemAddress(item)}`}
                         >
                           <PencilIcon className="h-4 w-4" />
@@ -1053,7 +1052,7 @@ const WatchItemsPage: React.FC = () => {
                         <button
                           onClick={() => handleRefresh(item)}
                           disabled={refreshing === item.id}
-                          className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-dark-text-muted hover:bg-dark-bg-tertiary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-blue disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="inline-flex items-center justify-center p-3 xl:p-1 border border-transparent rounded-full shadow-sm text-dark-text-muted hover:bg-dark-bg-tertiary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-blue disabled:opacity-50 disabled:cursor-not-allowed"
                           aria-label={`Refresh ${watchItemAddress(item)}`}
                         >
                           <ArrowPathIcon className={`h-4 w-4 ${refreshing === item.id ? 'animate-spin' : ''}`} />
@@ -1061,7 +1060,7 @@ const WatchItemsPage: React.FC = () => {
                         <button
                           onClick={() => handleDelete(item.id!)}
                           disabled={deleting === item.id}
-                          className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-red-500 hover:bg-brand-orange/10 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-orange disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="inline-flex items-center justify-center p-3 xl:p-1 border border-transparent rounded-full shadow-sm text-red-500 hover:bg-brand-orange/10 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-orange disabled:opacity-50 disabled:cursor-not-allowed"
                           aria-label={`Delete ${watchItemAddress(item)}`}
                         >
                           {deleting === item.id ? (
