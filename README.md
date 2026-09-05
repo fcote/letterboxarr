@@ -11,7 +11,33 @@ Automatically sync Letterboxd lists to Radarr.
 Letterboxarr periodically reads configured Letterboxd lists, adds new films to
 Radarr, and serves a web interface for configuration and monitoring.
 
-![Letterboxarr dashboard](screenshots/dashboard.png)
+![Control room overview with sync status, recent additions, and watch lists](screenshots/dashboard.png)
+
+The Control room overview brings sync status, recent films, and watch lists
+together. Screenshots use sample data.
+
+<details>
+<summary>More screenshots</summary>
+
+### Watch lists
+
+Manage followed lists, tags, automatic additions, and watched progress.
+
+![Watch lists with tags, ratings, and watched progress](screenshots/watchlist.png)
+
+### Movies
+
+See each list's films, ratings, watched status, and additions to Radarr.
+
+![Films in a watch list with ratings and Radarr status](screenshots/movies.png)
+
+### Settings
+
+Configure sync timing, Radarr, your Letterboxd profile, and filters.
+
+![Settings for synchronization, Radarr, and Letterboxd](screenshots/config.png)
+
+</details>
 
 ## Features
 
