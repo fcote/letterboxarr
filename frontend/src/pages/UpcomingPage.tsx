@@ -255,12 +255,11 @@ const UpcomingPage: React.FC = () => {
     const KindIcon = kind.icon;
 
     return (
-      <li key={release.letterboxd_slug} className="px-4 py-2">
-        {/* One line per release: the title takes what room is left, what kind of
-            entry it is and the lists it came from are pictures rather than
-            words, and what neither can say hangs off them on hover */}
-        <div className="flex items-center gap-3">
-          <span className="w-24 flex-shrink-0 whitespace-nowrap text-sm font-medium text-dark-text-secondary">
+      <li key={release.letterboxd_slug} className="px-4 py-4 xl:py-2">
+        {/* Keep the title on its own row on smaller screens so dates,
+            source lists and Radarr actions cannot squeeze it out of view. */}
+        <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3 xl:flex">
+          <span className="col-span-2 flex-shrink-0 whitespace-nowrap xl:w-24 text-sm font-medium text-dark-text-secondary">
             {releaseDay(release.date)}
           </span>
 
@@ -276,7 +275,7 @@ const UpcomingPage: React.FC = () => {
             <span className="sr-only">{kind.label}</span>
           </Tooltip>
 
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 flex-1 break-words">
             <a
               href={release.letterboxd_url}
               target="_blank"
@@ -288,13 +287,12 @@ const UpcomingPage: React.FC = () => {
             <span className="ml-2 text-sm text-dark-text-muted">{release.year}</span>
           </div>
 
-          {/* One chip per list the film came from. The name is only there once
-              the row is wide enough to spare it: below that the picture says
-              what kind of list it was and the hover says which. */}
+          {/* Source names wrap onto additional rows so films belonging to
+              many lists cannot push the title or action out of the card. */}
           <Tooltip
             lines={originSummary(release)}
             focusable={false}
-            className="flex flex-shrink-0 items-center gap-1"
+            className="col-span-2 flex min-w-0 flex-wrap items-center gap-1 xl:max-w-[12rem]"
           >
             {release.watch_items.map(item => {
               const ListIcon = listIcon(item.path);
@@ -302,15 +300,10 @@ const UpcomingPage: React.FC = () => {
               return (
                 <span
                   key={item.id}
-                  className="inline-flex items-center rounded-full border border-dark-border bg-dark-bg-tertiary px-2 py-0.5 text-xs font-medium text-dark-text-muted"
+                  className="inline-flex min-w-0 max-w-full items-center rounded-full border border-dark-border bg-dark-bg-tertiary px-2 py-0.5 text-xs font-medium text-dark-text-muted"
                 >
                   <ListIcon className="h-3 w-3 flex-shrink-0" />
-                  <span className="ml-1 hidden max-w-32 truncate lg:block">{name}</span>
-                  {/* The same name, for where the row is too narrow to show it
-                      and for anything not reading the picture. Taken out of the
-                      tree above that width rather than hidden, so it is not read
-                      twice over once the visible one is there. */}
-                  <span className="sr-only lg:hidden">{name}</span>
+                  <span className="ml-1 max-w-[8rem] truncate">{name}</span>
                 </span>
               );
             })}
@@ -320,7 +313,7 @@ const UpcomingPage: React.FC = () => {
               configured one, which the page has already named once and every
               row would only repeat back */}
           <span
-            className={`hidden whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-medium sm:inline-flex sm:items-center ${
+            className={`col-span-2 inline-flex w-fit max-w-full items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${
               fellBack(release)
                 ? 'border-brand-orange/30 bg-brand-orange/20 text-brand-orange'
                 : 'border-dark-border bg-dark-bg-tertiary text-dark-text-muted'
@@ -332,7 +325,7 @@ const UpcomingPage: React.FC = () => {
           </span>
 
           {release.processed ? (
-            <span className="inline-flex items-center whitespace-nowrap rounded-full border border-brand-green/30 bg-brand-green/20 px-2.5 py-0.5 text-xs font-medium text-brand-green">
+            <span className="col-span-2 inline-flex w-fit shrink-0 items-center whitespace-nowrap rounded-full border border-brand-green/30 bg-brand-green/20 px-2.5 py-0.5 text-xs font-medium text-brand-green">
               <CheckCircleIcon className="mr-1 h-3 w-3" />
               In Radarr
             </span>
@@ -340,7 +333,7 @@ const UpcomingPage: React.FC = () => {
             <button
               onClick={() => handleAdd(release)}
               disabled={adding.indexOf(release.letterboxd_slug) !== -1}
-              className="btn-primary flex flex-shrink-0 items-center px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+              className="btn-primary col-span-2 flex w-fit flex-shrink-0 items-center px-3 py-3 xl:py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
               title="Hand it to Radarr now, so it is picked up as soon as it comes out"
             >
               {adding.indexOf(release.letterboxd_slug) !== -1 ? (
@@ -364,7 +357,7 @@ const UpcomingPage: React.FC = () => {
   return (
     <Layout>
       <div className="py-6 lg:py-8">
-        <div className="border-b border-dark-border pb-5 flex justify-between items-start gap-4">
+        <div className="border-b border-dark-border pb-5 flex flex-col justify-between items-start gap-4 sm:flex-row">
           <div className="min-w-0">
             <h1 className="text-2xl font-bold leading-6 text-dark-text-primary">Upcoming</h1>
             <p className="mt-2 max-w-4xl text-sm text-dark-text-muted">
@@ -451,8 +444,8 @@ const UpcomingPage: React.FC = () => {
 
         {/* Search, sort and filters on one row, kept in reach while scrolling */}
         {data.releases.length > 0 && (
-          <div className="sticky top-0 z-10 mt-6 flex flex-wrap items-center gap-2 bg-dark-bg-primary py-3">
-            <div className="relative min-w-64 max-w-sm flex-1">
+          <div className="relative z-10 mt-6 flex flex-wrap sm:sticky sm:top-0 items-center gap-2 bg-dark-bg-primary py-3">
+            <div className="relative w-full min-w-0 sm:max-w-sm sm:flex-1 sm:basis-64">
               <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-dark-text-muted" />
               <input
                 type="text"
@@ -508,12 +501,12 @@ const UpcomingPage: React.FC = () => {
                 : `${visible.length} of ${data.releases.length}`}
             </span>
 
-            <label className="ml-2 flex items-center gap-2 whitespace-nowrap text-xs text-dark-text-muted">
+            <label className="flex w-full min-w-0 items-center gap-2 whitespace-nowrap text-xs text-dark-text-muted sm:ml-2 sm:w-auto">
               Sort
               <select
                 value={sort}
                 onChange={(e) => setSort(e.target.value as SortKey)}
-                className="input-field h-9 py-0 text-sm"
+                className="input-field h-9 min-w-0 flex-1 py-0 text-sm sm:flex-none"
                 aria-label="Sort upcoming releases"
               >
                 {SORTS.map(([key, label]) => (
