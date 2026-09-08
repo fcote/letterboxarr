@@ -258,8 +258,8 @@ const UpcomingPage: React.FC = () => {
       <li key={release.letterboxd_slug} className="px-4 py-4 xl:py-2">
         {/* Keep the title on its own row on smaller screens so dates,
             source lists and Radarr actions cannot squeeze it out of view. */}
-        <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3 xl:flex">
-          <span className="col-span-2 flex-shrink-0 whitespace-nowrap xl:w-24 text-sm font-medium text-dark-text-secondary">
+        <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3 xl:grid-cols-[6rem_1.5rem_minmax(0,1fr)_minmax(0,1fr)_12rem_6rem]">
+          <span className="col-span-2 whitespace-nowrap text-sm font-medium text-dark-text-secondary xl:col-span-1">
             {releaseDay(release.date)}
           </span>
 
@@ -275,7 +275,7 @@ const UpcomingPage: React.FC = () => {
             <span className="sr-only">{kind.label}</span>
           </Tooltip>
 
-          <div className="min-w-0 flex-1 break-words">
+          <div className="min-w-0 break-words">
             <a
               href={release.letterboxd_url}
               target="_blank"
@@ -287,12 +287,12 @@ const UpcomingPage: React.FC = () => {
             <span className="ml-2 text-sm text-dark-text-muted">{release.year}</span>
           </div>
 
-          {/* Source names wrap onto additional rows so films belonging to
-              many lists cannot push the title or action out of the card. */}
+          {/* Shared column widths keep chips aligned between films. Source
+              names use the available space and wrap when their column fills. */}
           <Tooltip
             lines={originSummary(release)}
             focusable={false}
-            className="col-span-2 flex min-w-0 flex-wrap items-center gap-1 xl:max-w-[12rem]"
+            className="col-span-2 flex min-w-0 flex-wrap items-center gap-1 xl:col-span-1 xl:justify-end"
           >
             {release.watch_items.map(item => {
               const ListIcon = listIcon(item.path);
@@ -300,7 +300,7 @@ const UpcomingPage: React.FC = () => {
               return (
                 <span
                   key={item.id}
-                  className="inline-flex min-w-0 max-w-full items-center rounded-full border border-dark-border bg-dark-bg-tertiary px-2 py-0.5 text-xs font-medium text-dark-text-muted"
+                  className="inline-flex min-w-0 max-w-full items-center whitespace-nowrap rounded-full border border-dark-border bg-dark-bg-tertiary px-2 py-0.5 text-xs font-medium text-dark-text-muted"
                 >
                   <ListIcon className="h-3 w-3 flex-shrink-0" />
                   <span className="ml-1 max-w-[8rem] truncate">{name}</span>
@@ -313,19 +313,21 @@ const UpcomingPage: React.FC = () => {
               configured one, which the page has already named once and every
               row would only repeat back */}
           <span
-            className={`col-span-2 inline-flex w-fit max-w-full items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+            className={`col-span-2 inline-flex w-fit min-w-0 max-w-full items-center rounded-full border px-2.5 py-0.5 text-xs font-medium xl:col-span-1 xl:justify-self-end ${
               fellBack(release)
                 ? 'border-brand-orange/30 bg-brand-orange/20 text-brand-orange'
                 : 'border-dark-border bg-dark-bg-tertiary text-dark-text-muted'
             }`}
           >
-            {fellBack(release) && <GlobeAltIcon className="mr-1 h-3 w-3" />}
-            {release.release_type}
-            {!release.in_preferred_country && ` · ${release.release_country}`}
+            {fellBack(release) && <GlobeAltIcon className="mr-1 h-3 w-3 shrink-0" />}
+            <span className="min-w-0 break-words">
+              {release.release_type}
+              {!release.in_preferred_country && ` · ${release.release_country}`}
+            </span>
           </span>
 
           {release.processed ? (
-            <span className="col-span-2 inline-flex w-fit shrink-0 items-center whitespace-nowrap rounded-full border border-brand-green/30 bg-brand-green/20 px-2.5 py-0.5 text-xs font-medium text-brand-green">
+            <span className="col-span-2 inline-flex w-fit shrink-0 items-center whitespace-nowrap rounded-full border border-brand-green/30 bg-brand-green/20 px-2.5 py-0.5 text-xs font-medium text-brand-green xl:col-span-1 xl:justify-self-end">
               <CheckCircleIcon className="mr-1 h-3 w-3" />
               In Radarr
             </span>
@@ -333,7 +335,7 @@ const UpcomingPage: React.FC = () => {
             <button
               onClick={() => handleAdd(release)}
               disabled={adding.indexOf(release.letterboxd_slug) !== -1}
-              className="btn-primary col-span-2 flex w-fit flex-shrink-0 items-center px-3 py-3 xl:py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+              className="btn-primary col-span-2 flex w-fit flex-shrink-0 items-center px-3 py-3 xl:col-span-1 xl:justify-self-end xl:py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
               title="Hand it to Radarr now, so it is picked up as soon as it comes out"
             >
               {adding.indexOf(release.letterboxd_slug) !== -1 ? (
