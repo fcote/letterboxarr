@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 // Distance between the trigger and the bubble
@@ -34,11 +34,14 @@ const Tooltip: React.FC<TooltipProps> = ({
 }) => {
   const id = useId();
   const trigger = useRef<HTMLSpanElement>(null);
+  const bubble = useRef<HTMLDivElement>(null);
+  const dismissTimer = useRef<ReturnType<typeof setTimeout>>();
   const [placement, setPlacement] = useState<Placement | null>(null);
 
   const content = lines.filter((line): line is string => Boolean(line));
 
   const show = useCallback(() => {
+    clearTimeout(dismissTimer.current);
     const box = trigger.current?.getBoundingClientRect();
     if (!box) return;
 
@@ -51,18 +54,44 @@ const Tooltip: React.FC<TooltipProps> = ({
     });
   }, []);
 
-  const hide = useCallback(() => setPlacement(null), []);
+  const hide = useCallback(() => {
+    clearTimeout(dismissTimer.current);
+    setPlacement(null);
+  }, []);
+  const hideAfterPointerLeaves = () => {
+    dismissTimer.current = setTimeout(hide, 150);
+  };
+
+  useEffect(() => () => clearTimeout(dismissTimer.current), []);
+
+  useLayoutEffect(() => {
+    if (!placement || !bubble.current) return;
+    const box = bubble.current.getBoundingClientRect();
+    const correction = box.top < 8 ? 8 - box.top
+      : box.bottom > window.innerHeight - 8 ? window.innerHeight - 8 - box.bottom : 0;
+    if (Math.abs(correction) > 0.5) {
+      setPlacement(previous => previous && { ...previous, top: previous.top + correction });
+    }
+  }, [placement]);
 
   // The bubble is placed against where the trigger was, so anything that moves it
   // has to dismiss it rather than leave it stranded mid-page
   useEffect(() => {
     if (!placement) return;
 
-    window.addEventListener('scroll', hide, true);
+    const onScroll = (event: Event) => {
+      if (!bubble.current?.contains(event.target as Node)) hide();
+    };
+    window.addEventListener('scroll', onScroll, true);
     window.addEventListener('resize', hide);
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') hide();
+    };
+    window.addEventListener('keydown', onEscape);
     return () => {
-      window.removeEventListener('scroll', hide, true);
+      window.removeEventListener('scroll', onScroll, true);
       window.removeEventListener('resize', hide);
+      window.removeEventListener('keydown', onEscape);
     };
   }, [placement, hide]);
 
@@ -78,7 +107,7 @@ const Tooltip: React.FC<TooltipProps> = ({
         tabIndex={focusable ? 0 : undefined}
         aria-describedby={placement ? id : undefined}
         onMouseEnter={show}
-        onMouseLeave={hide}
+        onMouseLeave={hideAfterPointerLeaves}
         onFocus={show}
         onBlur={hide}
       >
@@ -86,12 +115,14 @@ const Tooltip: React.FC<TooltipProps> = ({
       </span>
       {placement && createPortal(
         <div
+          ref={bubble}
           id={id}
           role="tooltip"
           // Fixed and portalled to the body: the list sits in a card with
           // overflow hidden, which would otherwise cut the bubble off.
-          // pointer-events-none keeps it from stealing the hover it came from.
-          className="pointer-events-none fixed z-50 max-w-sm rounded-md border border-dark-border
+          onMouseEnter={() => clearTimeout(dismissTimer.current)}
+          onMouseLeave={hideAfterPointerLeaves}
+          className="fixed z-50 max-h-[calc(100dvh-1rem)] max-w-[min(24rem,calc(100vw-1rem))] overflow-y-auto break-words rounded-md border border-dark-border
                      bg-dark-bg-secondary px-3 py-2 text-xs shadow-xl"
           style={{
             left: placement.left,

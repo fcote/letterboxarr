@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { ChevronDownIcon, TagIcon } from '@heroicons/react/24/outline';
 
 export interface TagOption {
@@ -23,15 +23,22 @@ const TagFilter: React.FC<TagFilterProps> = ({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const panelId = useId();
 
   useEffect(() => {
     if (!open) return;
+    panel.current?.querySelector<HTMLElement>('input, button')?.focus();
 
     const closeOnOutside = (event: MouseEvent) => {
       if (!root.current?.contains(event.target as Node)) setOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
+      if (event.key === 'Escape') {
+        setOpen(false);
+        trigger.current?.focus();
+      }
     };
 
     document.addEventListener('mousedown', closeOnOutside);
@@ -54,12 +61,15 @@ const TagFilter: React.FC<TagFilterProps> = ({
   };
 
   return (
-    <div ref={root} className="relative">
+    <div ref={root} className="relative" onBlur={(event) => {
+      if (!event.currentTarget.contains(event.relatedTarget as Node)) setOpen(false);
+    }}>
       <button
+        ref={trigger}
         type="button"
         onClick={() => setOpen(previous => !previous)}
         aria-expanded={open}
-        aria-haspopup="listbox"
+        aria-controls={open ? panelId : undefined}
         className={`flex h-9 items-center gap-1.5 whitespace-nowrap rounded-md border px-3 text-xs font-medium ${
           selected.length > 0
             ? 'border-brand-blue/30 bg-brand-blue/20 text-brand-blue'
@@ -73,10 +83,11 @@ const TagFilter: React.FC<TagFilterProps> = ({
 
       {open && (
         <div
-          role="listbox"
-          aria-multiselectable="true"
+          ref={panel}
+          id={panelId}
+          role="group"
           aria-label="Filter by tag"
-          className="absolute left-0 z-30 mt-2 w-72 rounded-md border border-dark-border bg-dark-bg-secondary p-2 shadow-xl"
+          className="absolute left-0 z-30 mt-2 w-64 max-w-[calc(100vw-2rem)] rounded-md border border-dark-border bg-dark-bg-secondary p-2 shadow-xl"
         >
           <div className="flex items-center justify-between px-1 pb-2">
             <span className="text-xs text-dark-text-muted">{label}</span>
@@ -107,13 +118,11 @@ const TagFilter: React.FC<TagFilterProps> = ({
           {narrowed.length === 0 ? (
             <p className="px-2 py-2 text-sm text-dark-text-muted">No tag matches "{query.trim()}".</p>
           ) : (
-            <ul className="max-h-96 overflow-y-auto">
+            <ul className="max-h-64 overflow-y-auto overscroll-contain">
               {narrowed.map(({ tag, count }) => (
                 <li key={tag}>
                   <label
-                    className="flex cursor-pointer items-center gap-2.5 rounded px-2 py-1.5 text-sm hover:bg-dark-bg-tertiary"
-                    role="option"
-                    aria-selected={selected.includes(tag)}
+                    className="flex min-h-11 cursor-pointer items-center gap-2.5 rounded px-2 py-2 text-sm hover:bg-dark-bg-tertiary focus-within:bg-dark-bg-tertiary"
                   >
                     <input
                       type="checkbox"
@@ -121,7 +130,7 @@ const TagFilter: React.FC<TagFilterProps> = ({
                       onChange={() => toggle(tag)}
                       className="h-4 w-4 flex-shrink-0 rounded border-dark-border bg-dark-bg-tertiary text-brand-blue focus:ring-brand-blue"
                     />
-                    <span className="min-w-0 flex-1 truncate text-dark-text-secondary">{tag}</span>
+                    <span className="min-w-0 flex-1 break-words text-dark-text-secondary">{tag}</span>
                     <span className="text-xs text-dark-text-muted">{count}</span>
                   </label>
                 </li>

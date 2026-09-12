@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
+import { Dialog } from '@headlessui/react';
 import { watchItemsAPI, letterboxdAPI } from '../utils/api';
 import { WatchItem, WatchItemProgress, WatchItemRatings, LetterboxdTestResult } from '../types';
 import toast from 'react-hot-toast';
@@ -81,6 +82,7 @@ const WatchItemsPage: React.FC = () => {
   // two hundred listings can be read
   const pageRun = useRef(0);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
   const [editingItem, setEditingItem] = useState<WatchItem | null>(null);
@@ -156,6 +158,8 @@ const WatchItemsPage: React.FC = () => {
     pageRun.current += 1;
     const run = pageRun.current;
     setLoading(true);
+    setLoadingMore(false);
+    setLoadError(false);
 
     try {
       const page = await watchItemsAPI.getPage(query(0));
@@ -168,7 +172,7 @@ const WatchItemsPage: React.FC = () => {
       setLoadedKey(queryKey);
     } catch {
       if (run !== pageRun.current) return;
-      toast.error('Failed to load watch items');
+      setLoadError(true);
     } finally {
       if (run === pageRun.current) setLoading(false);
     }
@@ -226,7 +230,7 @@ const WatchItemsPage: React.FC = () => {
     // No node while the first page is loading or the list is empty, nothing to
     // fetch once every matching list is in hand, and nothing to append while
     // the rows on screen still belong to the query before this one
-    if (!node || !hasMore || loading || loadingMore || loadedKey !== queryKey) return;
+    if (!node || !hasMore || loading || loadingMore || loadError || loadedKey !== queryKey) return;
 
     const observer = new IntersectionObserver(
       entries => { if (entries[0].isIntersecting) loadNextPage(); },
@@ -234,7 +238,7 @@ const WatchItemsPage: React.FC = () => {
     );
     observer.observe(node);
     return () => observer.disconnect();
-  }, [hasMore, loading, loadingMore, loadNextPage, loadedKey, queryKey]);
+  }, [hasMore, loading, loadingMore, loadError, loadNextPage, loadedKey, queryKey]);
 
   // Reloads on every change of query, since all of it is decided on the server
   useEffect(() => {
@@ -538,7 +542,8 @@ const WatchItemsPage: React.FC = () => {
   if (loading && loadedKey === null) {
     return (
       <Layout>
-        <div className="flex justify-center items-center h-64">
+        <div role="status" className="flex justify-center items-center gap-3 h-64">
+          <span className="text-sm text-dark-text-muted">Loading watch lists…</span>
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-blue"></div>
         </div>
       </Layout>
@@ -576,14 +581,14 @@ const WatchItemsPage: React.FC = () => {
 
         {/* Add Form Modal */}
         {showAddForm && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 overflow-y-auto h-full w-full z-50">
-            <div className="relative top-20 mx-auto p-5 w-11/12 md:w-3/4 lg:w-1/2 shadow-lg rounded-md card">
+          <Dialog open={showAddForm} onClose={() => { if (!submitting) setShowAddForm(false); }} className="fixed inset-0 z-50 overflow-y-auto bg-black/50 px-4 py-6 sm:py-16">
+            <Dialog.Panel className="card mx-auto w-full max-w-2xl p-5 sm:p-6">
               <div className="mt-3">
-                <h3 className="text-lg font-medium text-dark-text-primary mb-4">Add New Watch Item</h3>
+                <Dialog.Title className="text-lg font-medium text-dark-text-primary mb-4">Add watch item</Dialog.Title>
                 <form onSubmit={handleSubmit} className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-dark-text-secondary">
-                      Letterboxd Path
+                    <label htmlFor="add-path" className="block text-sm font-medium text-dark-text-secondary">
+                      Letterboxd path
                     </label>
                     <div className="mt-1 flex rounded-md shadow-sm">
                       {!isLink(newItem.path) && (
@@ -593,6 +598,7 @@ const WatchItemsPage: React.FC = () => {
                       )}
                       <input
                         type="text"
+                        id="add-path"
                         value={newItem.path}
                         onChange={(e) => setNewItem({ ...newItem, path: e.target.value })}
                         disabled={submitting}
@@ -609,12 +615,13 @@ const WatchItemsPage: React.FC = () => {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-dark-text-secondary">
+                    <label htmlFor="add-tags" className="block text-sm font-medium text-dark-text-secondary">
                       Tags (optional)
                     </label>
                     <div className="mt-1 flex rounded-md shadow-sm">
                       <input
                         type="text"
+                        id="add-tags"
                         value={tagInput}
                         onChange={(e) => setTagInput(e.target.value)}
                         onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddTags())}
@@ -664,12 +671,12 @@ const WatchItemsPage: React.FC = () => {
                         Automatically add movies to Radarr
                       </label>
                     </div>
-                    <p className="mt-1 text-sm text-gray-500">
+                    <p className="mt-1 text-sm text-dark-text-muted">
                       When disabled, movies will only be tracked but not automatically added to Radarr
                     </p>
                   </div>
 
-                  <div className="flex justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
                     <button
                       type="button"
                       onClick={testLetterboxdUrl}
@@ -725,20 +732,20 @@ const WatchItemsPage: React.FC = () => {
                   </div>
                 </form>
               </div>
-            </div>
-          </div>
+            </Dialog.Panel>
+          </Dialog>
         )}
 
         {/* Edit Form Modal */}
         {showEditForm && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 overflow-y-auto h-full w-full z-50">
-            <div className="relative top-20 mx-auto p-5 w-11/12 md:w-3/4 lg:w-1/2 shadow-lg rounded-md card">
+          <Dialog open={showEditForm} onClose={() => { if (!editing) setShowEditForm(false); }} className="fixed inset-0 z-50 overflow-y-auto bg-black/50 px-4 py-6 sm:py-16">
+            <Dialog.Panel className="card mx-auto w-full max-w-2xl p-5 sm:p-6">
               <div className="mt-3">
-                <h3 className="text-lg font-medium text-dark-text-primary mb-4">Edit Watch Item</h3>
+                <Dialog.Title className="text-lg font-medium text-dark-text-primary mb-4">Edit watch item</Dialog.Title>
                 <form onSubmit={handleEditSubmit} className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-dark-text-secondary">
-                      Letterboxd Path
+                    <label htmlFor="edit-path" className="block text-sm font-medium text-dark-text-secondary">
+                      Letterboxd path
                     </label>
                     <div className="mt-1 flex rounded-md shadow-sm">
                       {!isLink(editItem.path) && (
@@ -748,6 +755,7 @@ const WatchItemsPage: React.FC = () => {
                       )}
                       <input
                         type="text"
+                        id="edit-path"
                         value={editItem.path}
                         onChange={(e) => setEditItem({ ...editItem, path: e.target.value })}
                         disabled={editing}
@@ -764,12 +772,13 @@ const WatchItemsPage: React.FC = () => {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-dark-text-secondary">
+                    <label htmlFor="edit-tags" className="block text-sm font-medium text-dark-text-secondary">
                       Tags (optional)
                     </label>
                     <div className="mt-1 flex rounded-md shadow-sm">
                       <input
                         type="text"
+                        id="edit-tags"
                         value={editTagInput}
                         onChange={(e) => setEditTagInput(e.target.value)}
                         onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddEditTags())}
@@ -819,12 +828,12 @@ const WatchItemsPage: React.FC = () => {
                         Automatically add movies to Radarr
                       </label>
                     </div>
-                    <p className="mt-1 text-sm text-gray-500">
+                    <p className="mt-1 text-sm text-dark-text-muted">
                       When disabled, movies will only be tracked but not automatically added to Radarr
                     </p>
                   </div>
 
-                  <div className="flex justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
                     <button
                       type="button"
                       onClick={testEditLetterboxdUrl}
@@ -876,13 +885,13 @@ const WatchItemsPage: React.FC = () => {
                       {editing && (
                         <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
                       )}
-                      {editing ? 'Updating...' : 'Update Watch Item'}
+                      {editing ? 'Updating...' : 'Update watch item'}
                     </button>
                   </div>
                 </form>
               </div>
-            </div>
-          </div>
+            </Dialog.Panel>
+          </Dialog>
         )}
 
         {/* Search, sort and filters on one row, kept in reach while scrolling.
@@ -977,6 +986,20 @@ const WatchItemsPage: React.FC = () => {
           </p>
         )}
 
+        {loadError && (
+          <div role="alert" className="card mt-6 p-4">
+            <p className="text-sm font-medium text-dark-text-primary">Could not load watch lists</p>
+            <p className="mt-1 text-sm text-dark-text-muted">
+              {loadedKey === null
+                ? 'Check your connection and try again.'
+                : 'Showing the last loaded results. Try again to update this view.'}
+            </p>
+            <button type="button" onClick={loadFirstPage} className="btn-secondary mt-3 text-sm">
+              Try again
+            </button>
+          </div>
+        )}
+
         {/* Watch Items List. Dimmed rather than emptied while a new query is
             in flight: the rows below are the ones being replaced, and taking
             them away makes the page jump about on every keystroke. */}
@@ -984,7 +1007,7 @@ const WatchItemsPage: React.FC = () => {
           {/* Nothing configured at all, against nothing matching the filters:
               the first is answered by adding a list and the second by changing
               the search, so they cannot share a message. */}
-          {total === 0 ? (
+          {loadError && loadedKey === null ? null : total === 0 ? (
             <div className="text-center py-12">
               <FilmIcon className="mx-auto h-12 w-12 text-dark-text-muted" />
               <h3 className="mt-2 text-sm font-medium text-dark-text-primary">No watch items</h3>
