@@ -6,6 +6,7 @@ import {
   CogIcon,
   FilmIcon,
   Squares2X2Icon,
+  ArrowTopRightOnSquareIcon,
   ArrowRightOnRectangleIcon
 } from '@heroicons/react/24/outline';
 
@@ -81,6 +82,18 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       <main id="main-content" tabIndex={-1} className="mx-auto max-w-7xl px-4 py-2 sm:px-6 lg:px-10 lg:py-4">
         {children}
       </main>
+      <footer className="mx-auto flex max-w-7xl justify-end px-4 pb-4 sm:px-6 lg:px-10">
+        <a
+          href="https://github.com/fcote/letterboxarr"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Letterboxarr on GitHub (opens in a new tab)"
+          className="inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 text-xs text-dark-text-muted transition-colors hover:text-dark-text-primary"
+        >
+          GitHub
+          <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5" aria-hidden="true" />
+        </a>
+      </footer>
     </div>
   );
 };
